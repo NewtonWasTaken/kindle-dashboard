@@ -100,12 +100,16 @@ def _get_caldav_client() -> Optional[caldav.DAVClient]:
     return caldav.DAVClient(url=url, username=user, password=password)
 
 def fetch_calendar_events(max_events: int = 5) -> list[dict]:
+    t0 = datetime.now()
+    logger.info("Starting CalDAV calendar events fetch...")
     try:
         client = _get_caldav_client()
         if not client:
+            logger.warning("CalDAV client not configured (missing RADICALE_URL)")
             return []
         principal = client.principal()
         calendars = principal.calendars()
+        logger.info("Found %d calendars on Radicale server", len(calendars))
         
         now = datetime.now()
         start = now
@@ -113,8 +117,10 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
         
         events = []
         for calendar in calendars:
+            cal_name = getattr(calendar, 'name', str(calendar.url))
             try:
                 cal_events = calendar.search(event=True, start=start, end=end)
+                logger.info("Calendar '%s': retrieved %d raw events", cal_name, len(cal_events))
                 for event in cal_events:
                     try:
                         cal_obj = iCalendar.from_ical(event.data)
@@ -152,33 +158,41 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
                                     "_sort_key": sort_key
                                 })
                     except Exception as e:
-                        logger.error(f"Error parsing event: {e}")
+                        logger.error("Error parsing event in '%s': %s", cal_name, e)
             except Exception as e:
-                logger.error(f"Error searching calendar: {e}")
+                logger.error("Error searching calendar '%s': %s", cal_name, e)
                 
         events.sort(key=lambda x: x["_sort_key"])
         
         for e in events:
             del e["_sort_key"]
             
+        elapsed = (datetime.now() - t0).total_seconds()
+        logger.info("Finished CalDAV calendar events fetch in %.2fs (returning %d future events)", elapsed, len(events[:max_events]))
         return events[:max_events]
     except Exception as e:
-        logger.error(f"Error fetching calendar events: {e}")
+        elapsed = (datetime.now() - t0).total_seconds()
+        logger.error("Failed fetching calendar events after %.2fs: %s", elapsed, e)
         return []
 
 def fetch_tasks() -> list[dict]:
+    t0 = datetime.now()
+    logger.info("Starting CalDAV tasks fetch...")
     try:
         client = _get_caldav_client()
         if not client:
+            logger.warning("CalDAV client not configured (missing RADICALE_URL)")
             return []
         principal = client.principal()
         calendars = principal.calendars()
         
         tasks = []
         for calendar in calendars:
+            cal_name = getattr(calendar, 'name', str(calendar.url))
             try:
                 # Fetch only uncompleted TODOs from Radicale server
                 todos = calendar.search(todo=True, include_completed=False)
+                logger.info("Calendar '%s': retrieved %d uncompleted TODOs", cal_name, len(todos))
                 for todo in todos:
                     try:
                         cal_obj = iCalendar.from_ical(todo.data)
@@ -204,9 +218,9 @@ def fetch_tasks() -> list[dict]:
                                     "status": status
                                 })
                     except Exception as e:
-                        logger.error(f"Error parsing task: {e}")
+                        logger.error("Error parsing task in '%s': %s", cal_name, e)
             except Exception as e:
-                pass
+                logger.error("Error fetching todos in '%s': %s", cal_name, e)
                 
         def task_sort_key(t):
             p = t["priority"]
@@ -221,7 +235,10 @@ def fetch_tasks() -> list[dict]:
             return (p_key, due_key)
             
         tasks.sort(key=task_sort_key)
+        elapsed = (datetime.now() - t0).total_seconds()
+        logger.info("Finished CalDAV tasks fetch in %.2fs (returning %d tasks)", elapsed, len(tasks))
         return tasks
     except Exception as e:
-        logger.error(f"Error fetching tasks: {e}")
+        elapsed = (datetime.now() - t0).total_seconds()
+        logger.error("Failed fetching tasks after %.2fs: %s", elapsed, e)
         return []
