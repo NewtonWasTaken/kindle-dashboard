@@ -15,6 +15,12 @@
 					"priority": 2,
 					"action": "/mnt/us/dashboard/run.sh",
 					"params": "battery"
+				},
+				{
+					"name": "Zastavit Dashboard",
+					"priority": 3,
+					"action": "/mnt/us/dashboard/run.sh",
+					"params": "stop"
 				}
 			]
 		}

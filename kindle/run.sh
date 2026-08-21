@@ -19,6 +19,25 @@ log() {
     echo "[$(date)] $1" >> "$LOG_FILE"
 }
 
+# ----------------------------------------------------------------------------
+# REŽIM STOP — Ukončení běhu skriptu a obnovení normálního chování Kindlu
+# ----------------------------------------------------------------------------
+if [ "$MODE" = "stop" ]; then
+    log "Zastavuji Kindle Dashboard..."
+    if [ -f "$PID_FILE" ]; then
+        OLD_PID=$(cat "$PID_FILE")
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+            kill -9 "$OLD_PID" 2>/dev/null
+        fi
+        rm -f "$PID_FILE"
+    fi
+    # Obnovení automatického zamykání obrazovky
+    lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
+    # Návrat na domovskou obrazovku Kindlu
+    lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home 2>/dev/null
+    exit 0
+fi
+
 # Zabít případnou předchozí instanci
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
