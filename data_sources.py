@@ -106,6 +106,24 @@ def _get_caldav_client() -> Optional[caldav.DAVClient]:
     logger.info("[CalDAV] Connecting to %s (user: %s)...", url, user or "none")
     return caldav.DAVClient(url=url, username=user, password=password, timeout=5)
 
+def _filter_calendars(calendars: list, env_var_name: str) -> list:
+    watched_str = os.environ.get(env_var_name, "").strip()
+    if not watched_str:
+        return calendars
+    
+    allowed = [name.strip().lower() for name in watched_str.split(",") if name.strip()]
+    if not allowed:
+        return calendars
+
+    filtered = []
+    for cal in calendars:
+        cal_name = getattr(cal, 'name', '') or str(cal.url)
+        if cal_name.lower() in allowed:
+            filtered.append(cal)
+        else:
+            logger.info("[CalDAV] Skipping calendar '%s' (not in %s)", cal_name, env_var_name)
+    return filtered
+
 def fetch_calendar_events(max_events: int = 5) -> list[dict]:
     t0 = time.time()
     logger.info("[Calendar] Starting events fetch...")
@@ -116,8 +134,9 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
         
         principal = client.principal()
         logger.info("[Calendar] Principal retrieved. Discovering calendars...")
-        calendars = principal.calendars()
-        logger.info("[Calendar] Found %d calendars on Radicale.", len(calendars))
+        all_calendars = principal.calendars()
+        calendars = _filter_calendars(all_calendars, "WATCHED_CALENDARS")
+        logger.info("[Calendar] Processing %d of %d total calendars on Radicale.", len(calendars), len(all_calendars))
         
         now = datetime.now()
         start = now
@@ -191,7 +210,9 @@ def fetch_tasks() -> list[dict]:
             return []
             
         principal = client.principal()
-        calendars = principal.calendars()
+        all_calendars = principal.calendars()
+        calendars = _filter_calendars(all_calendars, "WATCHED_TASK_CALENDARS")
+        logger.info("[Tasks] Processing %d of %d total calendars on Radicale.", len(calendars), len(all_calendars))
         
         tasks = []
         for cal in calendars:
