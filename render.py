@@ -317,7 +317,8 @@ def _get_service_icon_img(name: str, size: int = 20) -> Optional[Image.Image]:
     alias_map = {
         'immich_server': 'immich',
         'seadrive': 'seafile',
-        'pi-hole': 'pihole',
+        'pihole': 'pi-hole',
+        'pi-hole': 'pi-hole',
     }
     cdn_name = alias_map.get(name_clean, name_clean)
 
@@ -339,26 +340,33 @@ def _get_service_icon_img(name: str, size: int = 20) -> Optional[Image.Image]:
             except Exception:
                 pass
 
-    # Try downloading from CDN
-    try:
-        import requests
-        url = f"https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/{cdn_name}.png"
-        resp = requests.get(url, timeout=3)
-        if resp.status_code == 200:
-            raw = Image.open(io.BytesIO(resp.content)).convert('RGBA')
-            bg = Image.new('RGBA', raw.size, (255, 255, 255, 255))
-            composite = Image.alpha_composite(bg, raw).convert('L')
-            
-            icons_dir = os.path.join(base_dir, 'icons')
-            os.makedirs(icons_dir, exist_ok=True)
-            save_p = os.path.join(icons_dir, f"{name_clean}.png")
-            composite.save(save_p)
-            
-            res_img = composite.resize((size, size), Image.Resampling.LANCZOS)
-            _icon_cache[key] = res_img
-            return res_img
-    except Exception:
-        pass
+    # Try downloading from CDN or direct website favicons
+    urls_to_try = []
+    if name_clean in ('jangraffe.cz', 'jangraffe'):
+        urls_to_try.append('https://jangraffe.cz/favicon.png')
+    elif name_clean in ('skautitvarozna', 'skautitvarozna.cz'):
+        urls_to_try.append('https://www.skautitvarozna.cz/favicon.ico')
+    
+    urls_to_try.append(f"https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/{cdn_name}.png")
+
+    for url in urls_to_try:
+        try:
+            resp = requests.get(url, timeout=4, headers={'User-Agent': 'Mozilla/5.0'})
+            if resp.status_code == 200:
+                raw = Image.open(io.BytesIO(resp.content)).convert('RGBA')
+                bg = Image.new('RGBA', raw.size, (255, 255, 255, 255))
+                composite = Image.alpha_composite(bg, raw).convert('L')
+                
+                icons_dir = os.path.join(base_dir, 'icons')
+                os.makedirs(icons_dir, exist_ok=True)
+                save_p = os.path.join(icons_dir, f"{name_clean}.png")
+                composite.save(save_p)
+                
+                res_img = composite.resize((size, size), Image.Resampling.LANCZOS)
+                _icon_cache[key] = res_img
+                return res_img
+        except Exception:
+            pass
 
     _icon_cache[key] = None
     return None
