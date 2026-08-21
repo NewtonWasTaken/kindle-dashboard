@@ -132,12 +132,37 @@ def _draw_header(draw, weather, width, fonts):
 
 def _group_events_by_day(events):
     today = datetime.now().date()
-    groups = OrderedDict()
+    day_map = OrderedDict()
+
     for ev in events:
         start = ev.get('start')
+        end = ev.get('end')
         if start is None:
             continue
-        ev_date = start.date() if isinstance(start, datetime) else start
+
+        start_date = start.date() if isinstance(start, datetime) else start
+
+        if end is None:
+            end_date = start_date
+        elif isinstance(end, datetime):
+            if end.time() == datetime.min.time() and end > start:
+                end_date = (end - timedelta(days=1)).date()
+            else:
+                end_date = end.date()
+        else:
+            if end > start_date:
+                end_date = end - timedelta(days=1)
+            else:
+                end_date = start_date
+
+        curr_date = start_date
+        while curr_date <= end_date:
+            if curr_date >= today:
+                day_map.setdefault(curr_date, []).append(ev)
+            curr_date += timedelta(days=1)
+
+    groups = OrderedDict()
+    for ev_date in sorted(day_map.keys()):
         delta = (ev_date - today).days
         if delta == 0:
             label = "Dnes"
@@ -145,7 +170,8 @@ def _group_events_by_day(events):
             label = "Zítra"
         else:
             label = f"{CZECH_DAYS[ev_date.weekday()]}  {ev_date.day}.{ev_date.month}."
-        groups.setdefault(label, []).append(ev)
+        groups[label] = day_map[ev_date]
+
     return groups
 
 

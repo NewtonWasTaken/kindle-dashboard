@@ -1,5 +1,4 @@
 import os
-import time
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
@@ -11,8 +10,6 @@ from icalendar import Calendar as iCalendar
 logger = logging.getLogger(__name__)
 
 def fetch_docker_status() -> list[dict]:
-    t0 = time.time()
-    logger.info("[Docker] Fetching container statuses...")
     try:
         client = docker.from_env()
         watched_str = os.environ.get("WATCHED_CONTAINERS", "")
@@ -38,18 +35,14 @@ def fetch_docker_status() -> list[dict]:
                 "status": status,
                 "health": health
             })
-        logger.info("[Docker] Finished in %.2fs. Found %d containers.", time.time() - t0, len(result))
         return result
     except Exception as e:
-        logger.error("[Docker] Error fetching status (took %.2fs): %s", time.time() - t0, e)
         return []
 
 def fetch_weather() -> dict:
-    t0 = time.time()
-    lat = os.environ.get("WEATHER_LAT", "49.1847")
-    lon = os.environ.get("WEATHER_LON", "16.7064")
-    logger.info("[Weather] Fetching Open-Meteo for lat=%s, lon=%s...", lat, lon)
     try:
+        lat = os.environ.get("WEATHER_LAT", "49.1847")
+        lon = os.environ.get("WEATHER_LON", "16.7064")
         url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
                "&current=temperature_2m,relative_humidity_2m,weather_code"
                "&daily=weather_code,temperature_2m_max,temperature_2m_min"
@@ -87,10 +80,8 @@ def fetch_weather() -> dict:
                 "temp_max": t_max[i] if i < len(t_max) else "N/A",
                 "weather_code": codes[i] if i < len(codes) else "N/A"
             })
-        logger.info("[Weather] Finished in %.2fs. Temp: %s°C", time.time() - t0, res["current"]["temperature"])
         return res
     except Exception as e:
-        logger.error("[Weather] Error fetching weather (took %.2fs): %s", time.time() - t0, e)
         return {
             "current": {"temperature": "N/A", "humidity": "N/A", "weather_code": "N/A"},
             "daily": []
@@ -101,9 +92,7 @@ def _get_caldav_client() -> Optional[caldav.DAVClient]:
     user = os.environ.get("RADICALE_USER")
     password = os.environ.get("RADICALE_PASS")
     if not url:
-        logger.warning("[CalDAV] RADICALE_URL is not set!")
         return None
-    logger.info("[CalDAV] Connecting to %s (user: %s)...", url, user or "none")
     return caldav.DAVClient(url=url, username=user, password=password, timeout=5)
 
 def _filter_calendars(calendars: list, env_var_name: str) -> list:
@@ -120,23 +109,17 @@ def _filter_calendars(calendars: list, env_var_name: str) -> list:
         cal_name = getattr(cal, 'name', '') or str(cal.url)
         if cal_name.lower() in allowed:
             filtered.append(cal)
-        else:
-            logger.info("[CalDAV] Skipping calendar '%s' (not in %s)", cal_name, env_var_name)
     return filtered
 
-def fetch_calendar_events(max_events: int = 5) -> list[dict]:
-    t0 = time.time()
-    logger.info("[Calendar] Starting events fetch...")
+def fetch_calendar_events(max_events: int = 15) -> list[dict]:
     try:
         client = _get_caldav_client()
         if not client:
             return []
         
         principal = client.principal()
-        logger.info("[Calendar] Principal retrieved. Discovering calendars...")
         all_calendars = principal.calendars()
         calendars = _filter_calendars(all_calendars, "WATCHED_CALENDARS")
-        logger.info("[Calendar] Processing %d of %d total calendars on Radicale.", len(calendars), len(all_calendars))
         
         now = datetime.now()
         start = now
@@ -144,12 +127,8 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
         
         events = []
         for cal in calendars:
-            cal_name = getattr(cal, 'name', str(cal.url))
-            logger.info("[Calendar] Searching events in calendar '%s'...", cal_name)
-            cal_t0 = time.time()
             try:
                 cal_events = cal.search(event=True, start=start, end=end)
-                logger.info("[Calendar] '%s' returned %d raw events in %.2fs", cal_name, len(cal_events), time.time() - cal_t0)
                 
                 for event in cal_events:
                     try:
@@ -187,23 +166,19 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
                                     "_sort_key": sort_key
                                 })
                     except Exception as e:
-                        logger.error("[Calendar] Error parsing event in '%s': %s", cal_name, e)
+                        pass
             except Exception as e:
-                logger.error("[Calendar] Error searching calendar '%s': %s", cal_name, e)
+                pass
                 
         events.sort(key=lambda x: x["_sort_key"])
         for e in events:
             del e["_sort_key"]
             
-        logger.info("[Calendar] Finished in %.2fs. Found %d valid future events.", time.time() - t0, len(events))
         return events[:max_events]
     except Exception as e:
-        logger.error("[Calendar] Error fetching events (took %.2fs): %s", time.time() - t0, e)
         return []
 
 def fetch_tasks() -> list[dict]:
-    t0 = time.time()
-    logger.info("[Tasks] Starting tasks fetch...")
     try:
         client = _get_caldav_client()
         if not client:
@@ -212,16 +187,11 @@ def fetch_tasks() -> list[dict]:
         principal = client.principal()
         all_calendars = principal.calendars()
         calendars = _filter_calendars(all_calendars, "WATCHED_TASK_CALENDARS")
-        logger.info("[Tasks] Processing %d of %d total calendars on Radicale.", len(calendars), len(all_calendars))
         
         tasks = []
         for cal in calendars:
-            cal_name = getattr(cal, 'name', str(cal.url))
-            logger.info("[Tasks] Searching TODOs in calendar '%s'...", cal_name)
-            cal_t0 = time.time()
             try:
                 todos = cal.search(todo=True, include_completed=False)
-                logger.info("[Tasks] '%s' returned %d raw TODOs in %.2fs", cal_name, len(todos), time.time() - cal_t0)
                 
                 for todo in todos:
                     try:
@@ -246,25 +216,20 @@ def fetch_tasks() -> list[dict]:
                                     "status": status
                                 })
                     except Exception as e:
-                        logger.error("[Tasks] Error parsing task in '%s': %s", cal_name, e)
+                        pass
             except Exception as e:
-                logger.error("[Tasks] Error searching TODOs in '%s': %s", cal_name, e)
+                pass
                 
+        # Sort tasks by due date ascending (earliest due date first, tasks without due date last)
         def task_sort_key(t):
-            p = t["priority"]
-            p_key = (p == 0, -p)
             due = t["due"]
             if due is None:
-                due_key = (1, datetime.max)
-            else:
-                if not isinstance(due, datetime):
-                    due = datetime.combine(due, datetime.min.time())
-                due_key = (0, due.replace(tzinfo=None))
-            return (p_key, due_key)
+                return (1, datetime.max)
+            if not isinstance(due, datetime):
+                due = datetime.combine(due, datetime.min.time())
+            return (0, due.replace(tzinfo=None))
             
         tasks.sort(key=task_sort_key)
-        logger.info("[Tasks] Finished in %.2fs. Found %d active tasks.", time.time() - t0, len(tasks))
         return tasks
     except Exception as e:
-        logger.error("[Tasks] Error fetching tasks (took %.2fs): %s", time.time() - t0, e)
         return []
