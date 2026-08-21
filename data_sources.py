@@ -97,7 +97,7 @@ def _get_caldav_client() -> Optional[caldav.DAVClient]:
     password = os.environ.get("RADICALE_PASS")
     if not url:
         return None
-    return caldav.DAVClient(url=url, username=user, password=password)
+    return caldav.DAVClient(url=url, username=user, password=password, timeout=5)
 
 def fetch_calendar_events(max_events: int = 5) -> list[dict]:
     try:
@@ -107,12 +107,14 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
         principal = client.principal()
         calendars = principal.calendars()
         
-        start = datetime.now()
-        end = start + timedelta(days=7)
+        now = datetime.now()
+        start = now
+        end = now + timedelta(days=7)
         
         events = []
         for calendar in calendars:
             try:
+                # bulk REPORT query (fetches all event data in 1 request per calendar)
                 cal_events = calendar.search(event=True, start=start, end=end)
                 for event in cal_events:
                     try:
@@ -120,14 +122,27 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
                         for component in cal_obj.walk():
                             if component.name == "VEVENT":
                                 summary = str(component.get('summary', ''))
-                                dtstart = component.get('dtstart').dt
-                                dtend = component.get('dtend').dt if component.get('dtend') else dtstart
+                                dtstart_prop = component.get('dtstart')
+                                dtend_prop = component.get('dtend')
+                                
+                                if not dtstart_prop:
+                                    continue
+                                    
+                                dtstart = dtstart_prop.dt
+                                dtend = dtend_prop.dt if dtend_prop else dtstart
                                 
                                 all_day = not isinstance(dtstart, datetime)
+                                
+                                # Filter out past events
                                 if all_day:
+                                    if dtend < now.date():
+                                        continue
                                     sort_key = datetime.combine(dtstart, datetime.min.time())
                                 else:
-                                    sort_key = dtstart.replace(tzinfo=None)
+                                    dtend_naive = dtend.replace(tzinfo=None) if hasattr(dtend, 'replace') else dtend
+                                    if dtend_naive < now:
+                                        continue
+                                    sort_key = dtstart.replace(tzinfo=None) if hasattr(dtstart, 'replace') else dtstart
                                     
                                 events.append({
                                     "summary": summary,
@@ -162,14 +177,18 @@ def fetch_tasks() -> list[dict]:
         tasks = []
         for calendar in calendars:
             try:
-                todos = calendar.todos()
+                # Bulk REPORT query: fetch ONLY uncompleted TODOs in 1 request per calendar
+                todos = calendar.search(todo=True, include_completed=False)
                 for todo in todos:
                     try:
                         cal_obj = iCalendar.from_ical(todo.data)
                         for component in cal_obj.walk():
                             if component.name == "VTODO":
-                                status = str(component.get('status', 'NEEDS-ACTION'))
-                                if status == 'COMPLETED':
+                                status = str(component.get('status', 'NEEDS-ACTION')).upper()
+                                percent = component.get('percent-complete')
+                                
+                                # Skip completed or cancelled tasks
+                                if status == 'COMPLETED' or status == 'CANCELLED' or percent == 100:
                                     continue
                                     
                                 summary = str(component.get('summary', ''))
