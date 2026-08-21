@@ -20,7 +20,7 @@ log() {
 }
 
 # ----------------------------------------------------------------------------
-# REŽIM STOP — Ukončení běhu skriptu a obnovení normálního chování Kindlu
+# REŽIM STOP — Ukončení běhu skriptu a obnovení rozhraní Kindlu
 # ----------------------------------------------------------------------------
 if [ "$MODE" = "stop" ]; then
     log "Zastavuji Kindle Dashboard..."
@@ -31,7 +31,9 @@ if [ "$MODE" = "stop" ]; then
         fi
         rm -f "$PID_FILE"
     fi
-    # Obnovení automatického zamykání obrazovky
+    pkill -f "run.sh" 2>/dev/null
+    # Obnovení systémové lišty a zamykání obrazovky
+    lipc-set-prop com.lab126.statusbar hideStatusBar 0 2>/dev/null
     lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
     # Návrat na domovskou obrazovku Kindlu
     lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home 2>/dev/null
@@ -79,7 +81,8 @@ wait_for_wifi() {
     return 1
 }
 
-# Zabrání usnutí obrazovky v live režimu
+# Skryje horní lištu s časem a baterkou, ale PONECHÁ systém běhat (lze tedy použít KUAL tlačítko i tlačítko Power)
+lipc-set-prop com.lab126.statusbar hideStatusBar 1 2>/dev/null
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
 
 log "=== Spouštím Kindle Dashboard (Režim: $MODE) ==="

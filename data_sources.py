@@ -148,8 +148,8 @@ def fetch_docker_status() -> list[dict]:
 
 def fetch_weather() -> dict:
     try:
-        lat = os.environ.get("WEATHER_LAT", "49.1847")
-        lon = os.environ.get("WEATHER_LON", "16.7064")
+        lat = os.environ.get("WEATHER_LAT", "50.0755")
+        lon = os.environ.get("WEATHER_LON", "14.4378")
         url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
                "&current=temperature_2m,relative_humidity_2m,weather_code"
                "&daily=weather_code,temperature_2m_max,temperature_2m_min"
