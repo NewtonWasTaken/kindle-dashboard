@@ -4,7 +4,7 @@
 #  Umístit na Kindle: /mnt/us/dashboard/run.sh
 # ============================================================================
 
-SERVER_URL="http://192.168.1.47:5000/dashboard.png"  # Změň na IP tvého RPi4
+SERVER_URL="http://192.168.1.47:5000/dashboard.png"
 IMG_PATH="/tmp/dashboard.png"
 LOG_FILE="/tmp/dashboard.log"
 PID_FILE="/tmp/dashboard.pid"
@@ -32,8 +32,11 @@ if [ "$MODE" = "stop" ]; then
         rm -f "$PID_FILE"
     fi
     pkill -f "run.sh" 2>/dev/null
-    # Obnovení systémové lišty a zamykání obrazovky
+    # Obnovení systémové lišty, hodin a zamykání obrazovky
     lipc-set-prop com.lab126.statusbar hideStatusBar 0 2>/dev/null
+    lipc-set-prop com.lab126.statusbar clockVisible 1 2>/dev/null
+    lipc-set-prop com.lab126.pillow disableHeader 0 2>/dev/null
+    lipc-set-prop com.lab126.pillow suppressHeader 0 2>/dev/null
     lipc-set-prop com.lab126.powerd preventScreenSaver 0 2>/dev/null
     # Návrat na domovskou obrazovku Kindlu
     lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home 2>/dev/null
@@ -81,8 +84,11 @@ wait_for_wifi() {
     return 1
 }
 
-# Skryje horní lištu s časem a baterkou, ale PONECHÁ systém běhat (lze tedy použít KUAL tlačítko i tlačítko Power)
+# Skryje horní lištu, systémové hodiny i Pillow záhlaví, ale PONECHÁ systém běhat na pozadí
 lipc-set-prop com.lab126.statusbar hideStatusBar 1 2>/dev/null
+lipc-set-prop com.lab126.statusbar clockVisible 0 2>/dev/null
+lipc-set-prop com.lab126.pillow disableHeader 1 2>/dev/null
+lipc-set-prop com.lab126.pillow suppressHeader 1 2>/dev/null
 lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
 
 log "=== Spouštím Kindle Dashboard (Režim: $MODE) ==="
