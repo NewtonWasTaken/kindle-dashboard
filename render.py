@@ -6,8 +6,10 @@ Layout: large clock + date header, calendar/tasks (left ~60%),
 forecast/containers (right ~40%).
 """
 
+import os
 import io
 import logging
+import requests
 from datetime import datetime, timedelta
 from collections import OrderedDict
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
@@ -294,6 +296,87 @@ def _draw_forecast(draw, weather, x, y_start, col_w, y_end, fonts):
 # Containers
 # ---------------------------------------------------------------------------
 
+def _draw_heart_icon(draw, cx, cy, size=12):
+    """Draws a filled heart icon centered at (cx, cy)."""
+    r = size // 4
+    draw.ellipse((cx - 2*r, cy - 2*r, cx, cy), fill=0)
+    draw.ellipse((cx, cy - 2*r, cx + 2*r, cy), fill=0)
+    pts = [(cx - 2*r, cy - r // 2), (cx + 2*r, cy - r // 2), (cx, cy + 2*r)]
+    draw.polygon(pts, fill=0)
+
+_icon_cache = {}
+
+def _get_service_icon_img(name: str, size: int = 20) -> Optional[Image.Image]:
+    key = (name.lower(), size)
+    if key in _icon_cache:
+        return _icon_cache[key]
+
+    name_clean = name.lower().strip()
+    
+    alias_map = {
+        'immich_server': 'immich',
+        'seadrive': 'seafile',
+        'pi-hole': 'pihole',
+        'jangraffe.cz': 'hugo',
+        'skautitvarozna': 'wordpress',
+    }
+    cdn_name = alias_map.get(name_clean, name_clean)
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    icon_paths = [
+        os.path.join(base_dir, 'icons', f"{name_clean}.png"),
+        os.path.join(base_dir, 'icons', f"{cdn_name}.png"),
+        f"/app/icons/{name_clean}.png",
+        f"/app/icons/{cdn_name}.png",
+    ]
+
+    for p in icon_paths:
+        if os.path.exists(p):
+            try:
+                img = Image.open(p).convert('L')
+                img = img.resize((size, size), Image.Resampling.LANCZOS)
+                _icon_cache[key] = img
+                return img
+            except Exception:
+                pass
+
+    # Try downloading from CDN
+    try:
+        import requests
+        url = f"https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/{cdn_name}.png"
+        resp = requests.get(url, timeout=3)
+        if resp.status_code == 200:
+            raw = Image.open(io.BytesIO(resp.content)).convert('RGBA')
+            bg = Image.new('RGBA', raw.size, (255, 255, 255, 255))
+            composite = Image.alpha_composite(bg, raw).convert('L')
+            
+            icons_dir = os.path.join(base_dir, 'icons')
+            os.makedirs(icons_dir, exist_ok=True)
+            save_p = os.path.join(icons_dir, f"{name_clean}.png")
+            composite.save(save_p)
+            
+            res_img = composite.resize((size, size), Image.Resampling.LANCZOS)
+            _icon_cache[key] = res_img
+            return res_img
+    except Exception:
+        pass
+
+    _icon_cache[key] = None
+    return None
+
+def _draw_service_icon(draw, target_img, x, y, size, name, fonts):
+    """Draws a real service PNG icon or falls back to letter badge."""
+    icon_img = _get_service_icon_img(name, size)
+    if icon_img:
+        target_img.paste(icon_img, (x, y))
+    else:
+        draw.rectangle((x, y, x + size, y + size), outline=0, width=1)
+        letter = name[0].upper() if name else "?"
+        tb = draw.textbbox((0, 0), letter, font=fonts['section'])
+        tw = tb[2] - tb[0]
+        th = tb[3] - tb[1]
+        draw.text((x + (size - tw) // 2, y + (size - th) // 2 - 1), letter, font=fonts['section'], fill=0)
+
 def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
     y = _draw_section_header(draw, "Kontejnery", x, y_start, col_w, fonts)
 
@@ -301,41 +384,72 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
         draw.text((x + 10, y + 2), "Žádné kontejnery", font=fonts['small'], fill=120)
         return
 
-    ROW = 22
+    gap_x = 6
+    card_w = (col_w - gap_x) // 2
+    card_h = 36
+    gap_y = 6
+
+    col = 0
+    row_y = y
+
     for c in containers:
-        if y + ROW > y_end:
+        if row_y + card_h > y_end:
             break
+
+        card_x = x + col * (card_w + gap_x)
+
         name = c.get('name', '?')
         status = c.get('status', '')
         health = c.get('health', '')
         version = c.get('version', '')
 
-        r = 5
-        cx, cy = x + 14 + r, y + ROW // 2
+        # Card container box
+        draw.rectangle((card_x, row_y, card_x + card_w, row_y + card_h), outline=140, width=1)
 
-        if status in ('running', 'active') and health in ('healthy', 'none'):
-            if health == 'healthy':
-                draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=0)
-            else:
-                draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=120)
+        # Service icon on left (20x20)
+        icon_sz = 20
+        icon_x = card_x + 5
+        icon_y = row_y + (card_h - icon_sz) // 2
+        _draw_service_icon(draw, draw._image, icon_x, icon_y, icon_sz, name, fonts)
+
+        # Status icon on right (heart / dot / cross)
+        stat_x = card_x + card_w - 14
+        stat_y = row_y + card_h // 2
+
+        if status in ('running', 'active') and health == 'healthy':
+            # Heart for healthy
+            _draw_heart_icon(draw, stat_x, stat_y, size=12)
+        elif status in ('running', 'active'):
+            # Dot for running (no healthcheck)
+            draw.ellipse((stat_x - 4, stat_y - 4, stat_x + 4, stat_y + 4), fill=0)
         else:
-            # Draw X icon for stopped / exited / unhealthy / missing
-            draw.line((cx - r, cy - r, cx + r, cy + r), fill=0, width=2)
-            draw.line((cx + r, cy - r, cx - r, cy + r), fill=0, width=2)
+            # Cross for down / exited / unhealthy
+            draw.line((stat_x - 4, stat_y - 4, stat_x + 4, stat_y + 4), fill=0, width=2)
+            draw.line((stat_x + 4, stat_y - 4, stat_x - 4, stat_y + 4), fill=0, width=2)
 
-        # Draw container name
-        draw.text((x + 30, y + 1), name, font=fonts['body'], fill=0)
+        # Name and version text in middle
+        text_x = icon_x + icon_sz + 6
+        max_text_w = (stat_x - 8) - text_x
 
-        # Draw container version tag if available
-        if version and version.lower() not in ('latest', 'release', 'stable', 'master', 'main'):
-            if version[0].isdigit():
-                v_text = f"v{version}"
-            else:
-                v_text = version
-            nw = draw.textbbox((0, 0), name, font=fonts['body'])[2]
-            draw.text((x + 30 + nw + 6, y + 3), v_text, font=fonts['small'], fill=100)
+        # Container Name
+        disp_name = name
+        while draw.textbbox((0, 0), disp_name, font=fonts['body_bold'])[2] > max_text_w and len(disp_name) > 3:
+            disp_name = disp_name[:-1]
+        draw.text((text_x, row_y + 2), disp_name, font=fonts['body_bold'], fill=0)
 
-        y += ROW
+        # Container Version
+        v_str = version if version else (status if status != 'running' else '')
+        if v_str and v_str.lower() not in ('latest', 'release', 'stable'):
+            if v_str[0].isdigit():
+                v_str = f"v{v_str}"
+            while draw.textbbox((0, 0), v_str, font=fonts['footer'])[2] > max_text_w and len(v_str) > 3:
+                v_str = v_str[:-1]
+            draw.text((text_x, row_y + 20), v_str, font=fonts['footer'], fill=100)
+
+        col += 1
+        if col >= 2:
+            col = 0
+            row_y += card_h + gap_y
 
 
 # ---------------------------------------------------------------------------
