@@ -318,8 +318,6 @@ def _get_service_icon_img(name: str, size: int = 20) -> Optional[Image.Image]:
         'immich_server': 'immich',
         'seadrive': 'seafile',
         'pi-hole': 'pihole',
-        'jangraffe.cz': 'hugo',
-        'skautitvarozna': 'wordpress',
     }
     cdn_name = alias_map.get(name_clean, name_clean)
 
