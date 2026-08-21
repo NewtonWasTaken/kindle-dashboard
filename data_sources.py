@@ -27,32 +27,73 @@ def _to_date(d) -> Optional[date]:
         return d
     return None
 
+def _get_container_version(c) -> str:
+    try:
+        tags = getattr(c.image, 'tags', []) if hasattr(c, 'image') and c.image else []
+        if tags and len(tags) > 0:
+            full_tag = tags[0]
+            if ":" in full_tag:
+                tag = full_tag.split(":")[-1]
+                if tag:
+                    return tag
+        img_name = c.attrs.get('Config', {}).get('Image', '')
+        if ":" in img_name:
+            return img_name.split(":")[-1]
+        elif img_name:
+            return img_name
+    except Exception:
+        pass
+    return ""
+
 def fetch_docker_status() -> list[dict]:
     try:
         client = docker.from_env()
         watched_str = os.environ.get("WATCHED_CONTAINERS", "")
         watched = [name.strip() for name in watched_str.split(",")] if watched_str else []
         
-        containers = client.containers.list(all=True)
+        all_containers = client.containers.list(all=True)
+        container_map = {}
+        for c in all_containers:
+            c_name = c.name[1:] if c.name.startswith("/") else c.name
+            container_map[c_name] = c
+
         result = []
-        for c in containers:
-            name = c.name
-            if name.startswith("/"):
-                name = name[1:]
-            
-            if watched and name not in watched:
-                continue
+        if watched:
+            for name in watched:
+                if name in container_map:
+                    c = container_map[name]
+                    status = c.status
+                    health = "stopped"
+                    if status == "running":
+                        health = c.attrs.get("State", {}).get("Health", {}).get("Status", "none")
+                    version = _get_container_version(c)
+                    result.append({
+                        "name": name,
+                        "status": status,
+                        "health": health,
+                        "version": version
+                    })
+                else:
+                    result.append({
+                        "name": name,
+                        "status": "exited",
+                        "health": "stopped",
+                        "version": ""
+                    })
+        else:
+            for c_name, c in container_map.items():
+                status = c.status
+                health = "stopped"
+                if status == "running":
+                    health = c.attrs.get("State", {}).get("Health", {}).get("Status", "none")
+                version = _get_container_version(c)
+                result.append({
+                    "name": c_name,
+                    "status": status,
+                    "health": health,
+                    "version": version
+                })
                 
-            status = c.status
-            health = "stopped"
-            if status == "running":
-                health = c.attrs.get("State", {}).get("Health", {}).get("Status", "none")
-                
-            result.append({
-                "name": name,
-                "status": status,
-                "health": health
-            })
         return result
     except Exception as e:
         logger.error(f"Error fetching Docker status: {e}")

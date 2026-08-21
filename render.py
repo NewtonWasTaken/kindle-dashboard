@@ -308,18 +308,30 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
         name = c.get('name', '?')
         status = c.get('status', '')
         health = c.get('health', '')
+        version = c.get('version', '')
 
         r = 5
         cx, cy = x + 14 + r, y + ROW // 2
-        if health == 'healthy' or (status == 'running' and health != 'unhealthy'):
-            draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=0)
-        elif status == 'running':
-            draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=120)
+
+        if status in ('running', 'active') and health in ('healthy', 'none'):
+            if health == 'healthy':
+                draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=0)
+            else:
+                draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=120)
         else:
+            # Draw X icon for stopped / exited / unhealthy / missing
             draw.line((cx - r, cy - r, cx + r, cy + r), fill=0, width=2)
             draw.line((cx + r, cy - r, cx - r, cy + r), fill=0, width=2)
 
+        # Draw container name
         draw.text((x + 30, y + 1), name, font=fonts['body'], fill=0)
+
+        # Draw container version tag if available
+        if version:
+            v_text = version if version.startswith('v') else f"v{version}"
+            nw = draw.textbbox((0, 0), name, font=fonts['body'])[2]
+            draw.text((x + 30 + nw + 6, y + 3), v_text, font=fonts['small'], fill=100)
+
         y += ROW
 
 
