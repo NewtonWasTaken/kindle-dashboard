@@ -12,6 +12,17 @@ import time
 import logging
 import threading
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
+def _get_now() -> datetime:
+    tz_name = os.environ.get("TZ", "Europe/Prague")
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
 
 from flask import Flask, send_file, render_template_string, jsonify, redirect, url_for
 from data_sources import fetch_docker_status, fetch_weather, fetch_calendar_events, fetch_tasks
@@ -69,7 +80,7 @@ def refresh_data():
             _data_cache['containers'] = containers
             _data_cache['events'] = events
             _data_cache['tasks'] = tasks
-            _data_cache['last_update'] = datetime.now()
+            _data_cache['last_update'] = _get_now()
             _data_cache['error'] = None
 
         logging.info("Data refreshed in %.2fs (containers=%d, events=%d, tasks=%d)",
@@ -79,7 +90,7 @@ def refresh_data():
         logging.error("Data refresh failed: %s", exc)
         with _lock:
             _data_cache['error'] = str(exc)
-            _data_cache['last_update'] = datetime.now()
+            _data_cache['last_update'] = _get_now()
     finally:
         with _lock:
             _refresh_in_progress = False

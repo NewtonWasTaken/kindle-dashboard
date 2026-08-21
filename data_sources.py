@@ -25,6 +25,12 @@ def _to_naive_datetime(d) -> Optional[datetime]:
     if d is None:
         return None
     if isinstance(d, datetime):
+        if d.tzinfo is not None:
+            tz_name = os.environ.get("TZ", "Europe/Prague")
+            try:
+                d = d.astimezone(ZoneInfo(tz_name))
+            except Exception:
+                pass
         return d.replace(tzinfo=None)
     if isinstance(d, date):
         return datetime.combine(d, datetime.min.time())
@@ -34,6 +40,12 @@ def _to_date(d) -> Optional[date]:
     if d is None:
         return None
     if isinstance(d, datetime):
+        if d.tzinfo is not None:
+            tz_name = os.environ.get("TZ", "Europe/Prague")
+            try:
+                d = d.astimezone(ZoneInfo(tz_name))
+            except Exception:
+                pass
         return d.date()
     if isinstance(d, date):
         return d
@@ -248,6 +260,7 @@ def fetch_calendar_events(max_events: int = 15) -> list[dict]:
         calendars = _filter_calendars(all_calendars, "WATCHED_CALENDARS")
         
         now = _get_now()
+        now_naive = _to_naive_datetime(now)
         start = now
         end = now + timedelta(days=7)
         
@@ -282,7 +295,7 @@ def fetch_calendar_events(max_events: int = 15) -> list[dict]:
                                         continue
                                     sort_key = dtstart_naive
                                 else:
-                                    if dtend_naive and dtend_naive < now:
+                                    if dtend_naive and dtend_naive < now_naive:
                                         continue
                                     sort_key = dtstart_naive
                                     

@@ -557,7 +557,7 @@ def render_dashboard(
     draw.rectangle((0, 0, width - 1, height - 1), outline=0, width=1)
 
     # ---- footer ----
-    now = datetime.now()
+    now = _get_now()
     ft = f"Aktualizováno: {now.strftime('%H:%M')}"
     fb = draw.textbbox((0, 0), ft, font=fonts['footer'])
     draw.text((width - MARGIN - fb[2], height - 14), ft,
