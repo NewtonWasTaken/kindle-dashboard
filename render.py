@@ -10,6 +10,7 @@ import os
 import io
 import logging
 import requests
+from typing import Optional
 from datetime import datetime, timedelta
 from collections import OrderedDict
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
