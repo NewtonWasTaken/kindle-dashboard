@@ -327,8 +327,11 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
         draw.text((x + 30, y + 1), name, font=fonts['body'], fill=0)
 
         # Draw container version tag if available
-        if version:
-            v_text = version if version.startswith('v') else f"v{version}"
+        if version and version.lower() not in ('latest', 'release', 'stable', 'master', 'main'):
+            if version[0].isdigit():
+                v_text = f"v{version}"
+            else:
+                v_text = version
             nw = draw.textbbox((0, 0), name, font=fonts['body'])[2]
             draw.text((x + 30 + nw + 6, y + 3), v_text, font=fonts['small'], fill=100)
 

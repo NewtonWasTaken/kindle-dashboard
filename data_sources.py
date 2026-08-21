@@ -29,18 +29,53 @@ def _to_date(d) -> Optional[date]:
 
 def _get_container_version(c) -> str:
     try:
+        labels = c.attrs.get('Config', {}).get('Labels', {}) or {}
+        env_list = c.attrs.get('Config', {}).get('Env', []) or []
+        env_map = {}
+        for item in env_list:
+            if "=" in item:
+                k, v = item.split("=", 1)
+                env_map[k.upper()] = v
+
+        GENERIC_TAGS = ('latest', 'release', 'stable', 'master', 'main', 'nightly', 'dev', 'latest-arm64', 'latest-amd64')
+
+        def _clean_val(val: str) -> str:
+            val = val.strip()
+            if "version:-" in val:
+                val = val.split("version:-")[-1].strip().split("-")[0]
+            elif " " in val:
+                val = val.split()[0]
+            return val
+
+        # 1. Check standard OCI / Docker labels for real version
+        for l_key in ['org.opencontainers.image.version', 'version', 'build_version', 'io.pi-hole.version']:
+            if l_key in labels and labels[l_key]:
+                val = _clean_val(str(labels[l_key]))
+                if val and val.lower() not in GENERIC_TAGS:
+                    return val
+
+        # 2. Check environment variables inside container
+        for e_key in ['IMMICH_VERSION', 'JELLYFIN_VERSION', 'PIHOLE_VERSION', 'VERSION', 'APP_VERSION', 'RELEASE_TAG']:
+            if e_key in env_map and env_map[e_key]:
+                val = _clean_val(str(env_map[e_key]))
+                if val and val.lower() not in GENERIC_TAGS:
+                    return val
+
+        # 3. Check Image Tag if it's a specific version tag (e.g. :v1.98.0 or :10.8.13)
         tags = getattr(c.image, 'tags', []) if hasattr(c, 'image') and c.image else []
         if tags and len(tags) > 0:
             full_tag = tags[0]
             if ":" in full_tag:
-                tag = full_tag.split(":")[-1]
-                if tag:
-                    return tag
+                tag = full_tag.split(":")[-1].strip()
+                if tag and tag.lower() not in GENERIC_TAGS:
+                    return _clean_val(tag)
+
         img_name = c.attrs.get('Config', {}).get('Image', '')
         if ":" in img_name:
-            return img_name.split(":")[-1]
-        elif img_name:
-            return img_name
+            tag = img_name.split(":")[-1].strip()
+            if tag and tag.lower() not in GENERIC_TAGS:
+                return _clean_val(tag)
+
     except Exception:
         pass
     return ""
