@@ -1,0 +1,22 @@
+{
+	"items": [
+		{
+			"name": "Kindle Dashboard",
+			"priority": 0,
+			"items": [
+				{
+					"name": "Spustit: Live (30s refresh)",
+					"priority": 1,
+					"action": "/mnt/us/dashboard/run.sh",
+					"params": "live"
+				},
+				{
+					"name": "Spustit: Baterie (15m refresh)",
+					"priority": 2,
+					"action": "/mnt/us/dashboard/run.sh",
+					"params": "battery"
+				}
+			]
+		}
+	]
+}

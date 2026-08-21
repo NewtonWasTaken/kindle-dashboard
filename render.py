@@ -565,6 +565,12 @@ def render_dashboard(
 
     # ---- e-ink post-processing ----
     final = _optimize_for_eink(img)
+
+    # ---- optional rotation for Kindle hardware panel ----
+    rotate_deg = int(os.environ.get("ROTATE_DEG", "0"))
+    if rotate_deg in (90, 180, 270):
+        final = final.rotate(rotate_deg, expand=True)
+
     buf = io.BytesIO()
     final.save(buf, format="PNG")
     return buf.getvalue()
