@@ -14,6 +14,17 @@ from typing import Optional
 from datetime import datetime, timedelta
 from collections import OrderedDict
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
+def _get_now() -> datetime:
+    tz_name = os.environ.get("TZ", "Europe/Prague")
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
 
 from weather_icons import draw_weather_icon, WMO_DESCRIPTIONS
 
@@ -88,7 +99,7 @@ def _draw_section_header(draw, text, x, y, w, fonts):
 # ---------------------------------------------------------------------------
 
 def _draw_header(draw, weather, width, fonts):
-    now = datetime.now()
+    now = _get_now()
 
     # ---- large clock (left) ----
     time_str = now.strftime("%H:%M")
@@ -134,7 +145,7 @@ def _draw_header(draw, weather, width, fonts):
 # ---------------------------------------------------------------------------
 
 def _group_events_by_day(events):
-    today = datetime.now().date()
+    today = _get_now().date()
     day_map = OrderedDict()
 
     for ev in events:

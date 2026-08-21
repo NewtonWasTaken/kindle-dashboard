@@ -7,6 +7,18 @@ import requests
 import caldav
 from icalendar import Calendar as iCalendar
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
+
+def _get_now() -> datetime:
+    tz_name = os.environ.get("TZ", "Europe/Prague")
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now()
+
 logger = logging.getLogger(__name__)
 
 def _to_naive_datetime(d) -> Optional[datetime]:
@@ -235,7 +247,7 @@ def fetch_calendar_events(max_events: int = 15) -> list[dict]:
         all_calendars = principal.calendars()
         calendars = _filter_calendars(all_calendars, "WATCHED_CALENDARS")
         
-        now = datetime.now()
+        now = _get_now()
         start = now
         end = now + timedelta(days=7)
         

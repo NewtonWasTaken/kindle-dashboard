@@ -1,8 +1,11 @@
 FROM python:3.11-slim
 
-# Install fonts with Czech character support
+ENV TZ=Europe/Prague
+
+# Install fonts with Czech character support and timezone data
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
