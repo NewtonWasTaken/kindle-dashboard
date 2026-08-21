@@ -113,7 +113,8 @@ def fetch_calendar_events(max_events: int = 5) -> list[dict]:
         events = []
         for calendar in calendars:
             try:
-                cal_events = calendar.date_search(start, end)
+                # Use calendar.search instead of deprecated date_search
+                cal_events = calendar.search(event=True, start=start, end=end)
                 for event in cal_events:
                     try:
                         cal_obj = iCalendar.from_ical(event.data)
