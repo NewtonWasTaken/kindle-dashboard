@@ -46,10 +46,17 @@ _data_cache = {
     'error': None,
 }
 _lock = threading.Lock()
+_refresh_in_progress = False
 
 
 def refresh_data():
     """Fetch fresh data from all sources and update the cache."""
+    global _refresh_in_progress
+    with _lock:
+        if _refresh_in_progress:
+            return
+        _refresh_in_progress = True
+
     t0 = time.time()
     try:
         weather = fetch_weather()
@@ -72,18 +79,24 @@ def refresh_data():
         logging.error("Data refresh failed: %s", exc)
         with _lock:
             _data_cache['error'] = str(exc)
+            _data_cache['last_update'] = datetime.now()
+    finally:
+        with _lock:
+            _refresh_in_progress = False
 
 
 def background_refresh():
     """Daemon thread: refresh data periodically."""
-    refresh_data()
     while True:
+        try:
+            refresh_data()
+        except Exception as exc:
+            logging.error("Background refresh thread error: %s", exc)
         time.sleep(DATA_REFRESH_INTERVAL)
-        refresh_data()
 
 
-# Start background thread on import (works with both `python server.py` and gunicorn)
-_bg_thread = threading.Thread(target=background_refresh, daemon=True)
+# Start background thread on import
+_bg_thread = threading.Thread(target=background_refresh, daemon=True, name="BgRefreshThread")
 _bg_thread.start()
 
 # ---------------------------------------------------------------------------
@@ -94,9 +107,13 @@ _bg_thread.start()
 def dashboard_png():
     """Render and return the dashboard PNG (always fresh clock)."""
     with _lock:
-        if _data_cache['last_update'] is None:
-            refresh_data()
-        weather = _data_cache['weather']
+        needs_initial_refresh = (_data_cache['last_update'] is None and not _refresh_in_progress)
+
+    if needs_initial_refresh:
+        refresh_data()
+
+    with _lock:
+        weather = _data_cache['weather'] or {}
         containers = _data_cache['containers'] or []
         events = _data_cache['events'] or []
         tasks = _data_cache['tasks'] or []
@@ -121,7 +138,7 @@ def index():
     """Status page with live preview."""
     with _lock:
         last_update = (_data_cache['last_update'].strftime('%H:%M:%S')
-                       if _data_cache['last_update'] else 'Nikdy')
+                       if _data_cache['last_update'] else 'Načítám...')
         containers_count = len(_data_cache['containers'] or [])
         events_count = len(_data_cache['events'] or [])
         tasks_count = len(_data_cache['tasks'] or [])
@@ -145,8 +162,9 @@ def index():
 
 @app.route('/refresh')
 def refresh():
-    """Force an immediate data refresh."""
-    refresh_data()
+    """Force an immediate data refresh asynchronously."""
+    t = threading.Thread(target=refresh_data, daemon=True)
+    t.start()
     return redirect(url_for('index'))
 
 

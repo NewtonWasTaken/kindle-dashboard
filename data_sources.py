@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional
 import docker
 import requests
@@ -8,6 +8,24 @@ import caldav
 from icalendar import Calendar as iCalendar
 
 logger = logging.getLogger(__name__)
+
+def _to_naive_datetime(d) -> Optional[datetime]:
+    if d is None:
+        return None
+    if isinstance(d, datetime):
+        return d.replace(tzinfo=None)
+    if isinstance(d, date):
+        return datetime.combine(d, datetime.min.time())
+    return None
+
+def _to_date(d) -> Optional[date]:
+    if d is None:
+        return None
+    if isinstance(d, datetime):
+        return d.date()
+    if isinstance(d, date):
+        return d
+    return None
 
 def fetch_docker_status() -> list[dict]:
     try:
@@ -37,6 +55,7 @@ def fetch_docker_status() -> list[dict]:
             })
         return result
     except Exception as e:
+        logger.error(f"Error fetching Docker status: {e}")
         return []
 
 def fetch_weather() -> dict:
@@ -82,6 +101,7 @@ def fetch_weather() -> dict:
             })
         return res
     except Exception as e:
+        logger.error(f"Error fetching weather: {e}")
         return {
             "current": {"temperature": "N/A", "humidity": "N/A", "weather_code": "N/A"},
             "daily": []
@@ -146,17 +166,19 @@ def fetch_calendar_events(max_events: int = 15) -> list[dict]:
                                 dtend = dtend_prop.dt if dtend_prop else dtstart
                                 
                                 all_day = not isinstance(dtstart, datetime)
+                                dtstart_naive = _to_naive_datetime(dtstart)
+                                dtend_naive = _to_naive_datetime(dtend)
+                                dtend_d = _to_date(dtend)
                                 
-                                # Filter past events
+                                # Filter past events safely
                                 if all_day:
-                                    if dtend < now.date():
+                                    if dtend_d and dtend_d < now.date():
                                         continue
-                                    sort_key = datetime.combine(dtstart, datetime.min.time())
+                                    sort_key = dtstart_naive
                                 else:
-                                    dtend_naive = dtend.replace(tzinfo=None) if hasattr(dtend, 'replace') else dtend
-                                    if dtend_naive < now:
+                                    if dtend_naive and dtend_naive < now:
                                         continue
-                                    sort_key = dtstart.replace(tzinfo=None) if hasattr(dtstart, 'replace') else dtstart
+                                    sort_key = dtstart_naive
                                     
                                 events.append({
                                     "summary": summary,
@@ -166,9 +188,9 @@ def fetch_calendar_events(max_events: int = 15) -> list[dict]:
                                     "_sort_key": sort_key
                                 })
                     except Exception as e:
-                        pass
+                        logger.error(f"Error parsing VEVENT: {e}")
             except Exception as e:
-                pass
+                logger.error(f"Error searching calendar for events: {e}")
                 
         events.sort(key=lambda x: x["_sort_key"])
         for e in events:
@@ -176,6 +198,7 @@ def fetch_calendar_events(max_events: int = 15) -> list[dict]:
             
         return events[:max_events]
     except Exception as e:
+        logger.error(f"Error fetching calendar events: {e}")
         return []
 
 def fetch_tasks() -> list[dict]:
@@ -216,20 +239,19 @@ def fetch_tasks() -> list[dict]:
                                     "status": status
                                 })
                     except Exception as e:
-                        pass
+                        logger.error(f"Error parsing VTODO: {e}")
             except Exception as e:
-                pass
+                logger.error(f"Error searching TODOs: {e}")
                 
-        # Sort tasks by due date ascending (earliest due date first, tasks without due date last)
+        # Sort tasks by due date ascending safely
         def task_sort_key(t):
-            due = t["due"]
-            if due is None:
+            due_dt = _to_naive_datetime(t["due"])
+            if due_dt is None:
                 return (1, datetime.max)
-            if not isinstance(due, datetime):
-                due = datetime.combine(due, datetime.min.time())
-            return (0, due.replace(tzinfo=None))
+            return (0, due_dt)
             
         tasks.sort(key=task_sort_key)
         return tasks
     except Exception as e:
+        logger.error(f"Error fetching tasks: {e}")
         return []
