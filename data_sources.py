@@ -126,9 +126,27 @@ def _filter_calendars(calendars: list, env_var_name: str) -> list:
 
     filtered = []
     for cal in calendars:
-        cal_name = getattr(cal, 'name', '') or str(cal.url)
-        if cal_name.lower() in allowed:
+        names_to_check = []
+        if getattr(cal, 'name', None):
+            names_to_check.append(str(cal.name).lower())
+        try:
+            disp_name = cal.get_display_name()
+            if disp_name:
+                names_to_check.append(str(disp_name).lower())
+        except Exception:
+            pass
+        
+        # Check URL path component (e.g. /user/skola/ -> skola)
+        url_str = str(cal.url).rstrip('/').split('/')[-1].lower()
+        names_to_check.append(url_str)
+        import urllib.parse
+        names_to_check.append(urllib.parse.unquote(url_str))
+
+        if any(n in allowed for n in names_to_check):
             filtered.append(cal)
+        else:
+            logger.info(f"Skipping calendar {cal.url} (names {names_to_check} not in {allowed})")
+            
     return filtered
 
 def fetch_calendar_events(max_events: int = 15) -> list[dict]:
@@ -214,7 +232,8 @@ def fetch_tasks() -> list[dict]:
         tasks = []
         for cal in calendars:
             try:
-                todos = cal.search(todo=True, include_completed=False)
+                # Fetch TODOs without strict XML STATUS filter so tasks lacking STATUS header are included
+                todos = cal.search(todo=True)
                 
                 for todo in todos:
                     try:
@@ -228,7 +247,7 @@ def fetch_tasks() -> list[dict]:
                                     continue
                                     
                                 summary = str(component.get('summary', ''))
-                                due_prop = component.get('due')
+                                due_prop = component.get('due') or component.get('dtstart')
                                 due = due_prop.dt if due_prop else None
                                 priority = int(component.get('priority', 0))
                                 
