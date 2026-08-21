@@ -66,8 +66,8 @@ def _get_fonts():
         'body':         _load_font(bold=False, size=18),
         'body_bold':    _load_font(bold=True,  size=18),
         'small':        _load_font(bold=False, size=14),
-        'weather_temp': _load_font(bold=True,  size=30),
-        'weather_desc': _load_font(bold=False, size=14),
+        'weather_temp': _load_font(bold=True,  size=48),
+        'weather_desc': _load_font(bold=False, size=15),
         'footer':       _load_font(bold=False, size=12),
     }
 
@@ -84,7 +84,7 @@ def _draw_section_header(draw, text, x, y, w, fonts):
 
 
 # ---------------------------------------------------------------------------
-# Header: clock + date + compact weather
+# Header: clock + date + prominent weather
 # ---------------------------------------------------------------------------
 
 def _draw_header(draw, weather, width, fonts):
@@ -100,7 +100,7 @@ def _draw_header(draw, weather, width, fonts):
     date_str = f"{day_name}  {now.day}. {month_name} {now.year}"
     draw.text((MARGIN + 4, 66), date_str, font=fonts['date'], fill=40)
 
-    # ---- compact current weather (right side) ----
+    # ---- prominent current weather (right side) ----
     if weather and 'current' in weather:
         cur = weather['current']
         temp = cur.get('temperature', 0)
@@ -108,22 +108,22 @@ def _draw_header(draw, weather, width, fonts):
         desc = WMO_DESCRIPTIONS.get(code, '')
         humidity = cur.get('humidity', 0)
 
-        # temperature
-        temp_str = f"{temp:.0f}°C"
+        # temperature (48px bold)
+        temp_str = f"{temp:.0f}°C" if isinstance(temp, (int, float)) else str(temp)
         tb = draw.textbbox((0, 0), temp_str, font=fonts['weather_temp'])
         tw = tb[2] - tb[0]
         tx = width - MARGIN - tw
-        draw.text((tx, 10), temp_str, font=fonts['weather_temp'], fill=0)
+        draw.text((tx, 8), temp_str, font=fonts['weather_temp'], fill=0)
 
-        # icon left of temp
-        icon_sz = 30
-        draw_weather_icon(draw, code, tx - icon_sz - 6, 10, icon_sz)
+        # weather icon (44x44)
+        icon_sz = 44
+        draw_weather_icon(draw, code, tx - icon_sz - 10, 8, icon_sz)
 
-        # description + humidity
+        # description + humidity (15px)
         desc_line = f"{desc}  ·  vlhkost {humidity}%"
         db = draw.textbbox((0, 0), desc_line, font=fonts['weather_desc'])
         dw = db[2] - db[0]
-        draw.text((width - MARGIN - dw, 42), desc_line, font=fonts['weather_desc'], fill=80)
+        draw.text((width - MARGIN - dw, 66), desc_line, font=fonts['weather_desc'], fill=80)
 
     # ---- thick bottom line ----
     draw.line((0, HEADER_HEIGHT, width, HEADER_HEIGHT), fill=0, width=2)
@@ -378,6 +378,22 @@ def _draw_service_icon(draw, target_img, x, y, size, name, fonts):
         th = tb[3] - tb[1]
         draw.text((x + (size - tw) // 2, y + (size - th) // 2 - 1), letter, font=fonts['section'], fill=0)
 
+def _draw_autoscale_text(draw, x, y, text: str, max_w: int, bold: bool = True, start_size: int = 17, min_size: int = 9, fill: int = 0):
+    """Draws text by dynamically scaling down font size so it fits inside max_w."""
+    for sz in range(start_size, min_size - 1, -1):
+        font = _load_font(bold=bold, size=sz)
+        tb = draw.textbbox((0, 0), text, font=font)
+        if (tb[2] - tb[0]) <= max_w:
+            draw.text((x, y), text, font=font, fill=fill)
+            return
+    # Fallback to min_size with slight truncation if needed
+    font = _load_font(bold=bold, size=min_size)
+    t = text
+    while len(t) > 2 and draw.textbbox((0, 0), t + '…', font=font)[2] > max_w:
+        t = t[:-1]
+    final_text = t + '…' if len(t) < len(text) else t
+    draw.text((x, y), final_text, font=font, fill=fill)
+
 def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
     y = _draw_section_header(draw, "Kontejnery", x, y_start, col_w, fonts)
 
@@ -387,8 +403,8 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
 
     gap_x = 6
     card_w = (col_w - gap_x) // 2
-    card_h = 36
-    gap_y = 6
+    card_h = 41
+    gap_y = 5
 
     col = 0
     row_y = y
@@ -407,8 +423,8 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
         # Card container box
         draw.rectangle((card_x, row_y, card_x + card_w, row_y + card_h), outline=140, width=1)
 
-        # Service icon on left (20x20)
-        icon_sz = 20
+        # Service icon on left (22x22)
+        icon_sz = 22
         icon_x = card_x + 5
         icon_y = row_y + (card_h - icon_sz) // 2
         _draw_service_icon(draw, draw._image, icon_x, icon_y, icon_sz, name, fonts)
@@ -419,7 +435,7 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
 
         if status in ('running', 'active') and health == 'healthy':
             # Heart for healthy
-            _draw_heart_icon(draw, stat_x, stat_y, size=12)
+            _draw_heart_icon(draw, stat_x, stat_y, size=13)
         elif status in ('running', 'active'):
             # Dot for running (no healthcheck)
             draw.ellipse((stat_x - 4, stat_y - 4, stat_x + 4, stat_y + 4), fill=0)
@@ -432,20 +448,19 @@ def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
         text_x = icon_x + icon_sz + 6
         max_text_w = (stat_x - 8) - text_x
 
-        # Container Name
-        disp_name = name
-        while draw.textbbox((0, 0), disp_name, font=fonts['body_bold'])[2] > max_text_w and len(disp_name) > 3:
-            disp_name = disp_name[:-1]
-        draw.text((text_x, row_y + 2), disp_name, font=fonts['body_bold'], fill=0)
-
-        # Container Version
         v_str = version if version else (status if status != 'running' else '')
-        if v_str and v_str.lower() not in ('latest', 'release', 'stable'):
+        if v_str and v_str.lower() in ('latest', 'release', 'stable'):
+            v_str = ""
+
+        if v_str:
             if v_str[0].isdigit():
                 v_str = f"v{v_str}"
-            while draw.textbbox((0, 0), v_str, font=fonts['footer'])[2] > max_text_w and len(v_str) > 3:
-                v_str = v_str[:-1]
-            draw.text((text_x, row_y + 20), v_str, font=fonts['footer'], fill=100)
+            # Name at top, version below
+            _draw_autoscale_text(draw, text_x, row_y + 2, name, max_text_w, bold=True, start_size=16, min_size=10, fill=0)
+            _draw_autoscale_text(draw, text_x, row_y + 22, v_str, max_text_w, bold=False, start_size=12, min_size=9, fill=100)
+        else:
+            # No version tag -> vertically center container name in 41px card
+            _draw_autoscale_text(draw, text_x, row_y + 11, name, max_text_w, bold=True, start_size=16, min_size=10, fill=0)
 
         col += 1
         if col >= 2:
