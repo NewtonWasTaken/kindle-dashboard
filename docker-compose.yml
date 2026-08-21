@@ -6,15 +6,6 @@ services:
       - "5000:5000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      # Adjust RADICALE_URL, RADICALE_USER, RADICALE_PASS, and WATCHED_CONTAINERS as needed
-      - WEATHER_LAT=49.1847
-      - WEATHER_LON=16.7064
-      - RADICALE_URL=http://radicale:5232/user/
-      - RADICALE_USER=user
-      - RADICALE_PASS=password
-      - WATCHED_CONTAINERS=immich,jellyfin,radicale,pihole,seadrive,hugo
-      - SCREEN_WIDTH=800
-      - SCREEN_HEIGHT=600
-      - DATA_REFRESH_INTERVAL=300
+    env_file:
+      - .env
     restart: unless-stopped
