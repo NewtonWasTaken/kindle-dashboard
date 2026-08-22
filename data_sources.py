@@ -162,7 +162,10 @@ def fetch_weather() -> dict:
     try:
         lat = os.environ.get("WEATHER_LAT", "50.0755")
         lon = os.environ.get("WEATHER_LON", "14.4378")
-        url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&current=temperature_2m,relative_humidity_2m,weather_code,pressure_msl&timezone=Europe%2FPrague&forecast_days=4")
+        url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+               "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
+               "&current=temperature_2m,relative_humidity_2m,weather_code,pressure_msl"
+               "&timezone=Europe%2FPrague&forecast_days=4")
         
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
@@ -197,6 +200,17 @@ def fetch_weather() -> dict:
                 "temp_max": t_max[i] if i < len(t_max) else "N/A",
                 "weather_code": codes[i] if i < len(codes) else "N/A"
             })
+            
+        # Today's sunrise / sunset (index 0 = today)
+        sunrise_list = daily.get("sunrise", [])
+        sunset_list = daily.get("sunset", [])
+        if sunrise_list:
+            raw = sunrise_list[0]
+            res["current"]["sunrise"] = raw.split("T")[1] if "T" in str(raw) else str(raw)
+        if sunset_list:
+            raw = sunset_list[0]
+            res["current"]["sunset"] = raw.split("T")[1] if "T" in str(raw) else str(raw)
+
         return res
     except Exception as e:
         logger.error(f"Error fetching weather: {e}")
@@ -373,3 +387,12 @@ def fetch_tasks() -> list[dict]:
     except Exception as e:
         logger.error(f"Error fetching tasks: {e}")
         return []
+
+def fetch_cpu_temp() -> Optional[float]:
+    """Read host CPU temperature from a mounted thermal-zone file."""
+    path = os.environ.get("HOST_CPU_TEMP_FILE", "/host_sys/thermal_zone0/temp")
+    try:
+        with open(path) as f:
+            return round(int(f.read().strip()) / 1000, 1)
+    except Exception:
+        return None

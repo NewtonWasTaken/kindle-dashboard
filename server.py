@@ -25,7 +25,7 @@ def _get_now() -> datetime:
         return datetime.now()
 
 from flask import Flask, send_file, render_template_string, jsonify, redirect, url_for
-from data_sources import fetch_docker_status, fetch_weather, fetch_calendar_events, fetch_tasks
+from data_sources import fetch_docker_status, fetch_weather, fetch_calendar_events, fetch_tasks, fetch_cpu_temp
 from render import render_dashboard
 
 logging.basicConfig(
@@ -53,6 +53,7 @@ _data_cache = {
     'containers': None,
     'events': None,
     'tasks': None,
+    'cpu_temp': None,
     'last_update': None,
     'error': None,
 }
@@ -74,12 +75,14 @@ def refresh_data():
         containers = fetch_docker_status()
         events = fetch_calendar_events()
         tasks = fetch_tasks()
+        cpu_temp = fetch_cpu_temp()
 
         with _lock:
             _data_cache['weather'] = weather
             _data_cache['containers'] = containers
             _data_cache['events'] = events
             _data_cache['tasks'] = tasks
+            _data_cache['cpu_temp'] = cpu_temp
             _data_cache['last_update'] = _get_now()
             _data_cache['error'] = None
 
@@ -128,12 +131,14 @@ def dashboard_png():
         containers = _data_cache['containers'] or []
         events = _data_cache['events'] or []
         tasks = _data_cache['tasks'] or []
+        cpu_temp = _data_cache.get('cpu_temp')
 
     img_bytes = render_dashboard(
         weather=weather,
         containers=containers,
         events=events,
         tasks=tasks,
+        cpu_temp=cpu_temp,
         width=SCREEN_WIDTH,
         height=SCREEN_HEIGHT,
     )
@@ -156,12 +161,14 @@ def index():
         weather_temp = (_data_cache['weather'].get('current', {}).get('temperature')
                         if _data_cache['weather'] else None)
         error = _data_cache['error']
+        cpu_temp = _data_cache.get('cpu_temp')
         ts = int(time.time())
 
     return render_template_string(STATUS_HTML,
         last_update=last_update,
         data_interval=DATA_REFRESH_INTERVAL,
         width=SCREEN_WIDTH, height=SCREEN_HEIGHT,
+        cpu_temp=cpu_temp,
         containers_count=containers_count,
         events_count=events_count,
         tasks_count=tasks_count,
@@ -193,6 +200,7 @@ def api_status():
                 'tasks': len(_data_cache['tasks'] or []),
                 'weather_temp': (_data_cache['weather'].get('current', {}).get('temperature')
                                  if _data_cache['weather'] else None),
+                'cpu_temp': _data_cache.get('cpu_temp'),
             },
         })
 
@@ -263,6 +271,7 @@ STATUS_HTML = """<!DOCTYPE html>
       <p>Data: <span>{{ last_update }}</span></p>
       <p>Refresh dat: <span>{{ data_interval }}s</span></p>
       <p>Rozlišení: <span>{{ width }}×{{ height }}</span></p>
+      <p>CPU: <span>{% if cpu_temp is not none %}{{ cpu_temp }}°C{% else %}N/A{% endif %}</span></p>
     </div>
     <div class="card">
       <h3>Zdroje dat</h3>

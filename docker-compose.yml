@@ -6,6 +6,7 @@ services:
       - "5000:5000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/class/thermal/thermal_zone0/temp:/host_sys/thermal_zone0/temp:ro
     env_file:
       - .env
     restart: unless-stopped

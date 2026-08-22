@@ -1,9 +1,9 @@
 """
-Kindle Dashboard Renderer — Landscape Layout (800×600)
+Kindle Dashboard Renderer v2 — Modern Design (800×600 grayscale)
 
-Generates a grayscale PNG optimized for Kindle e-ink display.
-Layout: large clock + date header, calendar/tasks (left ~60%),
-forecast/containers (right ~40%).
+Clean rounded aesthetic optimised for Kindle e-ink display.
+Layout: three-line header, two-column body with
+calendar/tasks (left 55 %) and forecast/containers (right 45 %).
 """
 
 import os
@@ -11,13 +11,37 @@ import io
 import logging
 import requests
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from collections import OrderedDict
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     from backports.zoneinfo import ZoneInfo
+
+from weather_icons import draw_weather_icon, WMO_DESCRIPTIONS
+
+logger = logging.getLogger(__name__)
+
+# ── Layout constants ──────────────────────────────────────────────────
+DEFAULT_WIDTH = 800
+DEFAULT_HEIGHT = 600
+MARGIN = 10
+HEADER_H = 100
+CARD_R = 6            # corner radius for rounded cards
+
+CZECH_MONTHS = [
+    'ledna', 'února', 'března', 'dubna', 'května', 'června',
+    'července', 'srpna', 'září', 'října', 'listopadu', 'prosince',
+]
+CZECH_DAYS = [
+    'Pondělí', 'Úterý', 'Středa', 'Čtvrtek',
+    'Pátek', 'Sobota', 'Neděle',
+]
+
+
+# ── Timezone ──────────────────────────────────────────────────────────
 
 def _get_now() -> datetime:
     tz_name = os.environ.get("TZ", "Europe/Prague")
@@ -26,30 +50,10 @@ def _get_now() -> datetime:
     except Exception:
         return datetime.now()
 
-from weather_icons import draw_weather_icon, WMO_DESCRIPTIONS
 
-DEFAULT_WIDTH = 800
-DEFAULT_HEIGHT = 600
-MARGIN = 12
-HEADER_HEIGHT = 92
-SECTION_HEADER_H = 28
-LEFT_COL_RATIO = 0.60
-
-CZECH_MONTHS = [
-    'ledna', 'února', 'března', 'dubna', 'května', 'června',
-    'července', 'srpna', 'září', 'října', 'listopadu', 'prosince',
-]
-CZECH_DAYS = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle']
-
-logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Font loading
-# ---------------------------------------------------------------------------
+# ── Font loading ──────────────────────────────────────────────────────
 
 def _load_font(bold=False, size=16):
-    """Loads a TrueType font with broad fallback chain."""
     tag = '-Bold' if bold else ''
     tag_r = '-Regular' if not bold else '-Bold'
     paths = [
@@ -70,435 +74,499 @@ def _load_font(bold=False, size=16):
 
 def _get_fonts():
     return {
-        'clock':        _load_font(bold=True,  size=64),
-        'date':         _load_font(bold=False, size=18),
-        'section':      _load_font(bold=True,  size=16),
-        'day_group':    _load_font(bold=True,  size=16),
-        'body':         _load_font(bold=False, size=18),
-        'body_bold':    _load_font(bold=True,  size=18),
-        'small':        _load_font(bold=False, size=14),
-        'weather_temp': _load_font(bold=True,  size=48),
-        'weather_desc': _load_font(bold=False, size=15),
-        'footer':       _load_font(bold=False, size=12),
+        'clock':        _load_font(bold=True,  size=56),
+        'date':         _load_font(bold=False, size=16),
+        'section':      _load_font(bold=True,  size=13),
+        'day_label':    _load_font(bold=True,  size=14),
+        'body':         _load_font(bold=False, size=15),
+        'body_bold':    _load_font(bold=True,  size=15),
+        'small':        _load_font(bold=False, size=12),
+        'tiny':         _load_font(bold=False, size=11),
+        'weather_temp': _load_font(bold=True,  size=42),
+        'weather_desc': _load_font(bold=False, size=13),
+        'info_line':    _load_font(bold=False, size=12),
+        'footer':       _load_font(bold=False, size=11),
     }
 
 
-# ---------------------------------------------------------------------------
-# Section header helper
-# ---------------------------------------------------------------------------
+# ── Drawing helpers ───────────────────────────────────────────────────
 
-def _draw_section_header(draw, text, x, y, w, fonts):
-    """Inverted bar (white text on black) as section header. Returns next y."""
-    draw.rectangle((x, y, x + w, y + SECTION_HEADER_H), fill=0)
-    draw.text((x + 8, y + 5), text.upper(), font=fonts['section'], fill=255)
-    return y + SECTION_HEADER_H + 4
-
-
-# ---------------------------------------------------------------------------
-# Header: clock + date + prominent weather
-# ---------------------------------------------------------------------------
-
-def _draw_header(draw, weather, width, fonts):
-    now = _get_now()
-
-    # ---- large clock (left) ----
-    time_str = now.strftime("%H:%M")
-    draw.text((MARGIN + 2, 2), time_str, font=fonts['clock'], fill=0)
-
-    # ---- date below clock ----
-    day_name = CZECH_DAYS[now.weekday()]
-    month_name = CZECH_MONTHS[now.month - 1]
-    date_str = f"{day_name}  {now.day}. {month_name} {now.year}"
-    draw.text((MARGIN + 4, 66), date_str, font=fonts['date'], fill=40)
-
-    # ---- prominent current weather (right side) ----
-    if weather and 'current' in weather:
-        cur = weather['current']
-        temp = cur.get('temperature', 0)
-        code = cur.get('weather_code', 0)
-        desc = WMO_DESCRIPTIONS.get(code, '')
-        pressure = cur.get('pressure', 0)
-
-        # temperature (48px bold)
-        temp_str = f"{temp:.0f}°C" if isinstance(temp, (int, float)) else str(temp)
-        tb = draw.textbbox((0, 0), temp_str, font=fonts['weather_temp'])
-        tw = tb[2] - tb[0]
-        tx = width - MARGIN - tw
-        draw.text((tx, 8), temp_str, font=fonts['weather_temp'], fill=0)
-
-        # weather icon (60x60)
-        icon_sz = 60
-        draw_weather_icon(draw, code, tx - icon_sz - 10, 8, icon_sz)
-
-        # description + humidity (15px)
-        desc_line = f"{desc}  ·  tlak {pressure} hPa"
-        db = draw.textbbox((0, 0), desc_line, font=fonts['weather_desc'])
-        dw = db[2] - db[0]
-        draw.text((width - MARGIN - dw, 66), desc_line, font=fonts['weather_desc'], fill=80)
-
-    # ---- thick bottom line ----
-    draw.line((0, HEADER_HEIGHT, width, HEADER_HEIGHT), fill=0, width=2)
+def _section_label(draw, text, x, y, w, fonts):
+    """Uppercase label with an extending hairline. Returns next y."""
+    label = text.upper()
+    draw.text((x + 4, y + 2), label, font=fonts['section'], fill=40)
+    tb = draw.textbbox((x + 4, y + 2), label, font=fonts['section'])
+    lx = tb[2] + 8
+    ly = (tb[1] + tb[3]) // 2
+    if lx < x + w - 4:
+        draw.line((lx, ly, x + w - 4, ly), fill=160, width=1)
+    return y + 20
 
 
-# ---------------------------------------------------------------------------
-# Calendar (grouped by day)
-# ---------------------------------------------------------------------------
-
-def _group_events_by_day(events):
-    today = _get_now().date()
-    day_map = OrderedDict()
-
-    for ev in events:
-        start = ev.get('start')
-        end = ev.get('end')
-        if start is None:
-            continue
-
-        start_date = start.date() if isinstance(start, datetime) else start
-
-        if end is None:
-            end_date = start_date
-        elif isinstance(end, datetime):
-            if end.time() == datetime.min.time() and end > start:
-                end_date = (end - timedelta(days=1)).date()
-            else:
-                end_date = end.date()
-        else:
-            if end > start_date:
-                end_date = end - timedelta(days=1)
-            else:
-                end_date = start_date
-
-        curr_date = start_date
-        while curr_date <= end_date:
-            if curr_date >= today:
-                day_map.setdefault(curr_date, []).append(ev)
-            curr_date += timedelta(days=1)
-
-    groups = OrderedDict()
-    for ev_date in sorted(day_map.keys()):
-        delta = (ev_date - today).days
-        if delta == 0:
-            label = "Dnes"
-        elif delta == 1:
-            label = "Zítra"
-        else:
-            label = f"{CZECH_DAYS[ev_date.weekday()]}  {ev_date.day}.{ev_date.month}."
-        groups[label] = day_map[ev_date]
-
-    return groups
-
-
-def _draw_calendar(draw, events, x, y_start, col_w, y_end, fonts):
-    y = _draw_section_header(draw, "Kalendář", x, y_start, col_w, fonts)
-
-    if not events:
-        draw.text((x + 10, y + 2), "Žádné nadcházející události",
-                   font=fonts['small'], fill=120)
-        return
-
-    ROW = 22
-    groups = _group_events_by_day(events)
-
-    for day_label, day_events in groups.items():
-        if y + ROW > y_end:
+def _fit_text(draw, x, y, text, max_w, bold=True,
+              start_sz=14, min_sz=9, fill=0):
+    """Draw text, scaling font down until it fits *max_w*."""
+    for sz in range(start_sz, min_sz - 1, -1):
+        f = _load_font(bold=bold, size=sz)
+        tw = draw.textbbox((0, 0), text, font=f)[2]
+        if tw <= max_w:
+            draw.text((x, y), text, font=f, fill=fill)
+            return
+    f = _load_font(bold=bold, size=min_sz)
+    t = text
+    while len(t) > 2:
+        if draw.textbbox((0, 0), t + '\u2026', font=f)[2] <= max_w:
             break
-        # day label
-        draw.text((x + 8, y), day_label, font=fonts['day_group'], fill=0)
-        # thin underline
-        lb = draw.textbbox((x + 8, y), day_label, font=fonts['day_group'])
-        if day_label in ("Dnes", "Zítra"):
-            draw.line((x + 8, lb[3] + 1, x + 8 + 35, lb[3] + 1), fill=140, width=1)
-        else:
-            draw.line((x + 8, lb[3] + 1, x + 8 + 100, lb[3] + 1), fill=140, width=1)
-        y += ROW + 1
-
-        for ev in day_events:
-            if y + ROW > y_end:
-                break
-            start = ev.get('start')
-            if ev.get('all_day'):
-                t_str = "Celý den"
-            elif isinstance(start, datetime):
-                t_str = start.strftime("%H:%M")
-            else:
-                t_str = ""
-
-            summary = ev.get('summary', '')
-            text = f"  {t_str:<9} {summary}"
-            max_w = col_w - 24
-            while draw.textbbox((0, 0), text, font=fonts['body'])[2] > max_w and len(summary) > 5:
-                summary = summary[:-2]
-                text = f"  {t_str:<9} {summary}…"
-            draw.text((x + 8, y), text, font=fonts['body'], fill=0)
-            y += ROW
-
-        y += 4  # gap between groups
+        t = t[:-1]
+    draw.text((x, y), (t + '\u2026' if len(t) < len(text) else t),
+              font=f, fill=fill)
 
 
-# ---------------------------------------------------------------------------
-# Tasks
-# ---------------------------------------------------------------------------
-
-def _draw_tasks(draw, tasks, x, y_start, col_w, y_end, fonts):
-    y = _draw_section_header(draw, "Úkoly", x, y_start, col_w, fonts)
-
-    if not tasks:
-        draw.text((x + 10, y + 2), "Žádné úkoly", font=fonts['small'], fill=120)
-        return
-
-    ROW = 24
-    for task in tasks[:8]:
-        if y + ROW > y_end:
-            break
-
-        # checkbox
-        bsz = 12
-        by = y + (ROW - bsz) // 2
-        draw.rectangle((x + 8, by, x + 8 + bsz, by + bsz), outline=0, width=1)
-
-        summary = task.get('summary', '')
-        due = task.get('due')
-        due_str = f"  (do {due.day}.{due.month}.)" if due else ""
-
-        text = summary
-        max_w = col_w - 48
-        full = text + due_str
-        while draw.textbbox((0, 0), full, font=fonts['body'])[2] > max_w and len(text) > 5:
-            text = text[:-2]
-            full = text + "…" + due_str
-        if text != summary:
-            text += "…"
-
-        draw.text((x + 28, y + 2), text, font=fonts['body'], fill=0)
-        if due_str:
-            tw = draw.textbbox((0, 0), text, font=fonts['body'])[2]
-            draw.text((x + 28 + tw, y + 5 ), due_str, font=fonts['small'], fill=100)
-        y += ROW
+def _truncate(draw, text, font, max_w):
+    """Return *text* (with \u2026 if needed) that fits *max_w*."""
+    if draw.textbbox((0, 0), text, font=font)[2] <= max_w:
+        return text
+    t = text
+    while len(t) > 2:
+        if draw.textbbox((0, 0), t + '\u2026', font=font)[2] <= max_w:
+            return t + '\u2026'
+        t = t[:-1]
+    return t[:2] + '\u2026'
 
 
-# ---------------------------------------------------------------------------
-# Weather forecast (3 days)
-# ---------------------------------------------------------------------------
+# ── Service-icon loading & cache ──────────────────────────────────────
 
-def _draw_forecast(draw, weather, x, y_start, col_w, y_end, fonts):
-    y = _draw_section_header(draw, "Předpověď", x, y_start, col_w, fonts)
-
-    daily = weather.get('daily', []) if weather else []
-    if not daily:
-        draw.text((x + 10, y + 2), "Nedostupné", font=fonts['small'], fill=120)
-        return
-
-    ROW = 48
-    for day in daily[:3]:
-        if y + ROW > y_end:
-            break
-        day_name = day.get('day_name', '')
-        code = day.get('weather_code', 0)
-        t_min = day.get('temp_min', 0)
-        t_max = day.get('temp_max', 0)
-        desc = WMO_DESCRIPTIONS.get(code, '')
-
-        draw.text((x + 8, y + 6), f"{day_name}", font=fonts['body_bold'], fill=0)
-        draw_weather_icon(draw, code, x + 42, y + 2, 28)
-        draw.text((x + 76, y + 6), f"{t_min:.0f}° / {t_max:.0f}°",
-                   font=fonts['body'], fill=0)
-        draw.text((x + 76, y + 26), desc, font=fonts['small'], fill=80)
-        y += ROW
+_icon_cache: dict = {}
 
 
-# ---------------------------------------------------------------------------
-# Containers
-# ---------------------------------------------------------------------------
-
-def _draw_heart_icon(draw, cx, cy, size=12):
-    """Draws a filled heart icon centered at (cx, cy)."""
-    r = size // 4
-    draw.ellipse((cx - 2*r, cy - 2*r, cx, cy), fill=0)
-    draw.ellipse((cx, cy - 2*r, cx + 2*r, cy), fill=0)
-    pts = [(cx - 2*r, cy - r // 2), (cx + 2*r, cy - r // 2), (cx, cy + 2*r)]
-    draw.polygon(pts, fill=0)
-
-_icon_cache = {}
-
-def _get_service_icon_img(name: str, size: int = 20) -> Optional[Image.Image]:
+def _load_icon(name: str, size: int = 18) -> Optional[Image.Image]:
     key = (name.lower(), size)
     if key in _icon_cache:
         return _icon_cache[key]
 
-    name_clean = name.lower().strip()
-    
-    alias_map = {
+    clean = name.lower().strip()
+    aliases = {
         'immich_server': 'immich',
         'seadrive': 'seafile',
         'pihole': 'pi-hole',
         'pi-hole': 'pi-hole',
     }
-    cdn_name = alias_map.get(name_clean, name_clean)
+    cdn = aliases.get(clean, clean)
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    icon_paths = [
-        os.path.join(base_dir, 'icons', f"{name_clean}.png"),
-        os.path.join(base_dir, 'icons', f"{cdn_name}.png"),
-        f"/app/icons/{name_clean}.png",
-        f"/app/icons/{cdn_name}.png",
-    ]
+    base = os.path.dirname(os.path.abspath(__file__))
+    for fn in (clean, cdn):
+        for d in (os.path.join(base, 'icons'), '/app/icons'):
+            p = os.path.join(d, f"{fn}.png")
+            if os.path.exists(p):
+                try:
+                    img = Image.open(p).convert('L')
+                    img = img.resize((size, size), Image.Resampling.LANCZOS)
+                    _icon_cache[key] = img
+                    return img
+                except Exception:
+                    pass
 
-    for p in icon_paths:
-        if os.path.exists(p):
-            try:
-                img = Image.open(p).convert('L')
-                img = img.resize((size, size), Image.Resampling.LANCZOS)
-                _icon_cache[key] = img
-                return img
-            except Exception:
-                pass
-
-    # Try downloading from CDN or direct website favicons
-    urls_to_try = []
-    if name_clean in ('jangraffe.cz', 'jangraffe'):
-        urls_to_try.append('https://jangraffe.cz/favicon.png')
-    elif name_clean in ('skautitvarozna', 'skautitvarozna.cz'):
-        urls_to_try.append('https://www.skautitvarozna.cz/favicon.ico')
-    
-    urls_to_try.append(f"https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/{cdn_name}.png")
-
-    for url in urls_to_try:
+    urls: list[str] = []
+    if clean in ('jangraffe.cz', 'jangraffe'):
+        urls.append('https://jangraffe.cz/favicon.png')
+    elif clean in ('skautitvarozna', 'skautitvarozna.cz'):
+        urls.append('https://www.skautitvarozna.cz/favicon.ico')
+    urls.append(
+        f"https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/{cdn}.png"
+    )
+    for url in urls:
         try:
-            resp = requests.get(url, timeout=4, headers={'User-Agent': 'Mozilla/5.0'})
-            if resp.status_code == 200:
-                raw = Image.open(io.BytesIO(resp.content)).convert('RGBA')
+            r = requests.get(url, timeout=4,
+                             headers={'User-Agent': 'Mozilla/5.0'})
+            if r.status_code == 200:
+                raw = Image.open(io.BytesIO(r.content)).convert('RGBA')
                 bg = Image.new('RGBA', raw.size, (255, 255, 255, 255))
-                composite = Image.alpha_composite(bg, raw).convert('L')
-                
-                icons_dir = os.path.join(base_dir, 'icons')
+                comp = Image.alpha_composite(bg, raw).convert('L')
+                icons_dir = os.path.join(base, 'icons')
                 os.makedirs(icons_dir, exist_ok=True)
-                save_p = os.path.join(icons_dir, f"{name_clean}.png")
-                composite.save(save_p)
-                
-                res_img = composite.resize((size, size), Image.Resampling.LANCZOS)
-                _icon_cache[key] = res_img
-                return res_img
+                comp.save(os.path.join(icons_dir, f"{clean}.png"))
+                res = comp.resize((size, size), Image.Resampling.LANCZOS)
+                _icon_cache[key] = res
+                return res
         except Exception:
             pass
 
     _icon_cache[key] = None
     return None
 
-def _draw_service_icon(draw, target_img, x, y, size, name, fonts):
-    """Draws a real service PNG icon or falls back to letter badge."""
-    icon_img = _get_service_icon_img(name, size)
-    if icon_img:
-        target_img.paste(icon_img, (x, y))
+
+def _paste_icon(draw, img, x, y, sz, name, fonts):
+    """Paste service icon or draw a letter fallback in a rounded box."""
+    icon = _load_icon(name, sz)
+    if icon:
+        img.paste(icon, (x, y))
     else:
-        draw.rectangle((x, y, x + size, y + size), outline=0, width=1)
-        letter = name[0].upper() if name else "?"
-        tb = draw.textbbox((0, 0), letter, font=fonts['section'])
-        tw = tb[2] - tb[0]
-        th = tb[3] - tb[1]
-        draw.text((x + (size - tw) // 2, y + (size - th) // 2 - 1), letter, font=fonts['section'], fill=0)
+        draw.rounded_rectangle((x, y, x + sz, y + sz), radius=3,
+                               outline=140, width=1)
+        ch = name[0].upper() if name else '?'
+        f = _load_font(bold=True, size=max(sz - 6, 8))
+        tb = draw.textbbox((0, 0), ch, font=f)
+        draw.text(
+            (x + (sz - tb[2]) // 2, y + (sz - tb[3]) // 2 - 1),
+            ch, font=f, fill=80,
+        )
 
-def _draw_autoscale_text(draw, x, y, text: str, max_w: int, bold: bool = True, start_size: int = 17, min_size: int = 9, fill: int = 0):
-    """Draws text by dynamically scaling down font size so it fits inside max_w."""
-    for sz in range(start_size, min_size - 1, -1):
-        font = _load_font(bold=bold, size=sz)
-        tb = draw.textbbox((0, 0), text, font=font)
-        if (tb[2] - tb[0]) <= max_w:
-            draw.text((x, y), text, font=font, fill=fill)
-            return
-    # Fallback to min_size with slight truncation if needed
-    font = _load_font(bold=bold, size=min_size)
-    t = text
-    while len(t) > 2 and draw.textbbox((0, 0), t + '…', font=font)[2] > max_w:
-        t = t[:-1]
-    final_text = t + '…' if len(t) < len(text) else t
-    draw.text((x, y), final_text, font=font, fill=fill)
 
-def _draw_containers(draw, containers, x, y_start, col_w, y_end, fonts):
-    y = _draw_section_header(draw, "Kontejnery", x, y_start, col_w, fonts)
+# ── Header (3 lines) ─────────────────────────────────────────────────
 
-    if not containers:
-        draw.text((x + 10, y + 2), "Žádné kontejnery", font=fonts['small'], fill=120)
+def _draw_header(draw, weather, cpu_temp, width, fonts):
+    now = _get_now()
+    cur = weather.get('current', {}) if weather else {}
+
+    # Line 1 — clock (left), temperature + icon (right)
+    draw.text((MARGIN + 2, 2), now.strftime("%H:%M"),
+              font=fonts['clock'], fill=0)
+
+    if cur:
+        temp = cur.get('temperature', 0)
+        code = cur.get('weather_code', 0)
+        temp_s = (f"{temp:.0f}\u00b0C"
+                  if isinstance(temp, (int, float)) else str(temp))
+        tw = draw.textbbox((0, 0), temp_s, font=fonts['weather_temp'])[2]
+        tx = width - MARGIN - tw
+        draw.text((tx, 6), temp_s, font=fonts['weather_temp'], fill=0)
+        draw_weather_icon(draw, code, tx - 56, 4, 50)
+
+    # Line 2 — date (left), description + pressure (right)
+    day = CZECH_DAYS[now.weekday()]
+    mon = CZECH_MONTHS[now.month - 1]
+    draw.text((MARGIN + 4, 62),
+              f"{day}  {now.day}. {mon} {now.year}",
+              font=fonts['date'], fill=40)
+
+    if cur:
+        desc = WMO_DESCRIPTIONS.get(cur.get('weather_code', 0), '')
+        pressure = cur.get('pressure', '')
+        parts = [desc]
+        if pressure and pressure != 'N/A':
+            try:
+                parts.append(f"{int(float(pressure))} hPa")
+            except (ValueError, TypeError):
+                pass
+        line2 = '  \u00b7  '.join(p for p in parts if p)
+        if line2:
+            dw = draw.textbbox((0, 0), line2,
+                               font=fonts['weather_desc'])[2]
+            draw.text((width - MARGIN - dw, 64), line2,
+                      font=fonts['weather_desc'], fill=80)
+
+    # Line 3 — sunrise / sunset + CPU (right-aligned)
+    bits: list[str] = []
+    if cur:
+        sr = cur.get('sunrise', '')
+        ss = cur.get('sunset', '')
+        if sr:
+            bits.append(f"\u2191 {sr}")
+        if ss:
+            bits.append(f"\u2193 {ss}")
+    if cpu_temp is not None:
+        bits.append(f"CPU {cpu_temp:.0f}\u00b0C")
+    if bits:
+        info = '    '.join(bits)
+        iw = draw.textbbox((0, 0), info, font=fonts['info_line'])[2]
+        draw.text((width - MARGIN - iw, 84), info,
+                  font=fonts['info_line'], fill=100)
+
+    # separator
+    draw.line((MARGIN, HEADER_H, width - MARGIN, HEADER_H),
+              fill=0, width=2)
+
+
+# ── Calendar (grouped by day) ────────────────────────────────────────
+
+def _group_events(events):
+    today = _get_now().date()
+    buckets: dict[date, list] = OrderedDict()
+
+    for ev in events:
+        s = ev.get('start')
+        e = ev.get('end')
+        if s is None:
+            continue
+        sd = s.date() if isinstance(s, datetime) else s
+        if e is None:
+            ed = sd
+        elif isinstance(e, datetime):
+            ed = ((e - timedelta(days=1)).date()
+                  if e.time() == datetime.min.time() and e > s
+                  else e.date())
+        else:
+            ed = e - timedelta(days=1) if e > sd else sd
+
+        d = sd
+        while d <= ed:
+            if d >= today:
+                buckets.setdefault(d, []).append(ev)
+            d += timedelta(days=1)
+
+    out: OrderedDict[str, list] = OrderedDict()
+    for d in sorted(buckets):
+        delta = (d - today).days
+        if delta == 0:
+            lbl = "Dnes"
+        elif delta == 1:
+            lbl = "Zítra"
+        else:
+            lbl = f"{CZECH_DAYS[d.weekday()]}  {d.day}.{d.month}."
+        out[lbl] = buckets[d]
+    return out
+
+
+def _draw_calendar(draw, events, x, y0, w, y_end, fonts):
+    y = _section_label(draw, "Kalendář", x, y0, w, fonts)
+    if not events:
+        draw.text((x + 8, y + 4),
+                  "Žádné nadcházející události",
+                  font=fonts['small'], fill=140)
         return
 
-    gap_x = 6
-    card_w = (col_w - gap_x) // 2
-    card_h = 41
-    gap_y = 5
+    ROW = 20
+    for label, evts in _group_events(events).items():
+        if y + ROW > y_end:
+            break
+        # day label with subtle underline
+        draw.text((x + 6, y), label, font=fonts['day_label'], fill=0)
+        tb = draw.textbbox((x + 6, y), label, font=fonts['day_label'])
+        draw.line((x + 6, tb[3] + 1,
+                   x + 6 + min(90, tb[2] - x), tb[3] + 1),
+                  fill=160, width=1)
+        y += ROW + 2
 
-    col = 0
-    row_y = y
+        for ev in evts:
+            if y + ROW > y_end:
+                break
+            s = ev.get('start')
+            if ev.get('all_day'):
+                ts = 'celodenní'
+            elif isinstance(s, datetime):
+                ts = s.strftime('%H:%M')
+            else:
+                ts = ''
+            summ = ev.get('summary', '')
+            line = f"  {ts:<10}{summ}"
+            line = _truncate(draw, line, fonts['body'], w - 16)
+            draw.text((x + 6, y), line, font=fonts['body'], fill=0)
+            y += ROW
+        y += 4  # gap between day groups
 
-    for c in containers:
-        if row_y + card_h > y_end:
+
+# ── Tasks ─────────────────────────────────────────────────────────────
+
+def _format_due(due, now):
+    """Compact Czech due-label, e.g. 'Dnes 14:00', 'Zítra', '23.8.'."""
+    if due is None:
+        return ''
+    today = now.date()
+
+    if isinstance(due, datetime):
+        # normalise timezone
+        if due.tzinfo is not None and now.tzinfo is not None:
+            due = due.astimezone(now.tzinfo)
+        elif due.tzinfo is not None:
+            due = due.replace(tzinfo=None)
+        dd = due.date()
+        time_s = due.strftime('%H:%M') if (due.hour or due.minute) else ''
+    elif isinstance(due, date):
+        dd = due
+        time_s = ''
+    else:
+        return ''
+
+    delta = (dd - today).days
+    if delta < 0:
+        day_s = 'Zpožděno'
+    elif delta == 0:
+        day_s = 'Dnes'
+    elif delta == 1:
+        day_s = 'Zítra'
+    else:
+        day_s = f'{dd.day}.{dd.month}.'
+
+    return f'{day_s} {time_s}'.strip()
+
+
+def _is_overdue(due, now):
+    """True if *due* is in the past relative to *now*."""
+    try:
+        if isinstance(due, datetime):
+            if due.tzinfo and now.tzinfo:
+                return due.astimezone(now.tzinfo) < now
+            return due.replace(tzinfo=None) < now.replace(tzinfo=None)
+        if isinstance(due, date):
+            return due < now.date()
+    except Exception:
+        pass
+    return False
+
+
+def _draw_tasks(draw, tasks, x, y0, w, y_end, fonts):
+    y = _section_label(draw, "Úkoly", x, y0, w, fonts)
+    if not tasks:
+        draw.text((x + 8, y + 4), "Žádné úkoly",
+                  font=fonts['small'], fill=140)
+        return
+
+    now = _get_now()
+    ROW = 21
+    CB = 10          # checkbox size
+
+    for t in tasks:
+        if y + ROW > y_end:
             break
 
-        card_x = x + col * (card_w + gap_x)
+        summ = t.get('summary', '')
+        due = t.get('due')
+        due_s = _format_due(due, now)
 
+        # rounded checkbox
+        cy = y + (ROW - CB) // 2
+        draw.rounded_rectangle(
+            (x + 6, cy, x + 6 + CB, cy + CB),
+            radius=2, outline=0, width=1,
+        )
+
+        # due label (right-aligned, smaller font)
+        dw = 0
+        if due_s:
+            overdue = _is_overdue(due, now)
+            df = fonts['small']
+            dfill = 0 if overdue else 110
+            dtb = draw.textbbox((0, 0), due_s, font=df)
+            dw = dtb[2] - dtb[0] + 6
+            draw.text((x + w - dw, y + 4), due_s, font=df, fill=dfill)
+
+        # task name
+        max_nw = w - 26 - dw - 4
+        name = _truncate(draw, summ, fonts['body'], max_nw)
+        draw.text((x + 22, y + 1), name, font=fonts['body'], fill=0)
+
+        y += ROW
+
+
+# ── Forecast (rounded cards) ─────────────────────────────────────────
+
+def _draw_forecast(draw, weather, x, y0, w, y_end, fonts):
+    y = _section_label(draw, "Předpověď", x, y0, w, fonts)
+    daily = weather.get('daily', []) if weather else []
+    if not daily:
+        draw.text((x + 8, y + 4), "Nedostupné",
+                  font=fonts['small'], fill=140)
+        return
+
+    CH = 44
+    GAP = 4
+    for d in daily[:3]:
+        if y + CH > y_end:
+            break
+        # rounded card
+        draw.rounded_rectangle((x, y, x + w, y + CH),
+                               radius=CARD_R, outline=180, width=1)
+
+        dn = d.get('day_name', '')
+        code = d.get('weather_code', 0)
+        tmin = d.get('temp_min', 0)
+        tmax = d.get('temp_max', 0)
+        desc = (WMO_DESCRIPTIONS.get(code, '')
+                if isinstance(code, int) else '')
+
+        draw.text((x + 8, y + 5), dn,
+                  font=fonts['body_bold'], fill=0)
+        draw_weather_icon(draw, code, x + 38, y + 5, 24)
+        draw.text((x + 68, y + 5),
+                  f"{tmin:.0f}\u00b0 / {tmax:.0f}\u00b0",
+                  font=fonts['body'], fill=0)
+        draw.text((x + 68, y + 25), desc,
+                  font=fonts['small'], fill=100)
+        y += CH + GAP
+
+
+# ── Containers (3-column rounded grid) ───────────────────────────────
+
+def _draw_containers(draw, img, containers, x, y0, w, y_end, fonts):
+    y = _section_label(draw, "Kontejnery", x, y0, w, fonts)
+    if not containers:
+        draw.text((x + 8, y + 4), "Žádné kontejnery",
+                  font=fonts['small'], fill=140)
+        return
+
+    COLS = 3
+    GX, GY = 5, 5
+    cw = (w - (COLS - 1) * GX) // COLS
+    CH = 50
+    ICON = 18
+    col, ry = 0, y
+
+    for c in containers:
+        if ry + CH > y_end:
+            break
+        cx = x + col * (cw + GX)
         name = c.get('name', '?')
         status = c.get('status', '')
         health = c.get('health', '')
-        version = c.get('version', '')
+        ver = c.get('version', '')
 
-        # Card container box
-        draw.rectangle((card_x, row_y, card_x + card_w, row_y + card_h), outline=140, width=1)
+        # rounded card
+        draw.rounded_rectangle(
+            (cx, ry, cx + cw, ry + CH),
+            radius=CARD_R, outline=160, width=1,
+        )
 
-        # Service icon on left (22x22)
-        icon_sz = 22
-        icon_x = card_x + 5
-        icon_y = row_y + (card_h - icon_sz) // 2
-        _draw_service_icon(draw, draw._image, icon_x, icon_y, icon_sz, name, fonts)
+        # service icon (centred vertically)
+        iy = ry + (CH - ICON) // 2
+        _paste_icon(draw, img, cx + 4, iy, ICON, name, fonts)
 
-        # Status icon on right (heart / dot / cross)
-        stat_x = card_x + card_w - 14
-        stat_y = row_y + card_h // 2
-
+        # status dot (top-right corner)
+        dx = cx + cw - 9
+        dy = ry + 8
+        dr = 3
         if status in ('running', 'active') and health == 'healthy':
-            # Heart for healthy
-            _draw_heart_icon(draw, stat_x, stat_y, size=13)
+            draw.ellipse((dx - dr, dy - dr, dx + dr, dy + dr), fill=0)
         elif status in ('running', 'active'):
-            # Dot for running (no healthcheck)
-            draw.ellipse((stat_x - 4, stat_y - 4, stat_x + 4, stat_y + 4), fill=0)
+            draw.ellipse((dx - dr, dy - dr, dx + dr, dy + dr),
+                         outline=0, width=1)
         else:
-            # Cross for down / exited / unhealthy
-            draw.line((stat_x - 4, stat_y - 4, stat_x + 4, stat_y + 4), fill=0, width=2)
-            draw.line((stat_x + 4, stat_y - 4, stat_x - 4, stat_y + 4), fill=0, width=2)
+            draw.line((dx - 3, dy - 3, dx + 3, dy + 3), fill=0, width=1)
+            draw.line((dx + 3, dy - 3, dx - 3, dy + 3), fill=0, width=1)
 
-        # Name and version text in middle
-        text_x = icon_x + icon_sz + 6
-        max_text_w = (stat_x - 8) - text_x
+        # name + version text
+        tx = cx + 4 + ICON + 4
+        max_tw = cw - ICON - 20
 
-        v_str = version if version else (status if status != 'running' else '')
-        if v_str and v_str.lower() in ('latest', 'release', 'stable'):
-            v_str = ""
+        v = ver
+        if v and v.lower() in ('latest', 'release', 'stable',
+                                'master', 'main'):
+            v = ''
+        if v and v[0].isdigit():
+            v = f'v{v}'
 
-        if v_str:
-            if v_str[0].isdigit():
-                v_str = f"v{v_str}"
-            # Name at top, version below
-            _draw_autoscale_text(draw, text_x, row_y + 2, name, max_text_w, bold=True, start_size=16, min_size=10, fill=0)
-            _draw_autoscale_text(draw, text_x, row_y + 22, v_str, max_text_w, bold=False, start_size=12, min_size=9, fill=100)
+        if v:
+            _fit_text(draw, tx, ry + 5, name, max_tw,
+                      bold=True, start_sz=12, min_sz=9, fill=0)
+            _fit_text(draw, tx, ry + 23, v, max_tw,
+                      bold=False, start_sz=10, min_sz=8, fill=100)
         else:
-            # No version tag -> vertically center container name in 41px card
-            _draw_autoscale_text(draw, text_x, row_y + 11, name, max_text_w, bold=True, start_size=16, min_size=10, fill=0)
+            _fit_text(draw, tx, ry + (CH - 12) // 2, name, max_tw,
+                      bold=True, start_sz=12, min_sz=9, fill=0)
 
         col += 1
-        if col >= 2:
+        if col >= COLS:
             col = 0
-            row_y += card_h + gap_y
+            ry += CH + GY
 
 
-# ---------------------------------------------------------------------------
-# E-ink optimisation
-# ---------------------------------------------------------------------------
+# ── E-ink optimisation ────────────────────────────────────────────────
 
 def _optimize_for_eink(img):
-    """Quantise to 16 grayscale levels, sharpen text."""
+    """Quantise to 16 shades, sharpen text edges."""
     enhancer = ImageEnhance.Contrast(img)
     img = enhancer.enhance(1.1)
     enhancer = ImageEnhance.Sharpness(img)
     img = enhancer.enhance(1.5)
-
     import numpy as np
     arr = np.array(img, dtype=np.float32)
     arr = np.round(arr / 17.0) * 17.0
@@ -506,74 +574,69 @@ def _optimize_for_eink(img):
     return Image.fromarray(arr, mode='L')
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
+# ── Main entry point ──────────────────────────────────────────────────
 
 def render_dashboard(
     weather: dict,
     containers: list[dict],
     events: list[dict],
     tasks: list[dict],
+    cpu_temp: Optional[float] = None,
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
 ) -> bytes:
-    """Render the full dashboard and return PNG bytes."""
+    """Render full dashboard and return PNG bytes."""
     img = Image.new('L', (width, height), 255)
     draw = ImageDraw.Draw(img)
     fonts = _get_fonts()
 
-    # ---- header ----
-    _draw_header(draw, weather, width, fonts)
+    # ── header ──
+    _draw_header(draw, weather, cpu_temp, width, fonts)
 
-    # ---- layout geometry ----
-    body_top = HEADER_HEIGHT + 4
-    body_bot = height - 16
+    # ── body geometry ──
+    top = HEADER_H + 4
+    bot = height - 16
 
-    left_w = int(width * LEFT_COL_RATIO)
-    right_x = left_w + 6
-    right_w = width - right_x - MARGIN
+    left_w = int(width * 0.55)
+    rx = left_w + 8
+    rw = width - rx - MARGIN
 
-    # vertical divider between columns
-    draw.line((left_w + 2, body_top, left_w + 2, body_bot), fill=0, width=1)
+    # subtle vertical divider
+    draw.line((left_w + 3, top + 4, left_w + 3, bot - 4),
+              fill=200, width=1)
 
-    # ---- left column: calendar (62 %) + tasks (38 %) ----
-    split_left = body_top + int((body_bot - body_top) * 0.62)
+    # left column: calendar (62 %) / tasks (38 %)
+    split_l = top + int((bot - top) * 0.62)
+    _draw_calendar(draw, events, MARGIN, top,
+                   left_w - MARGIN - 8, split_l - 4, fonts)
+    draw.line((MARGIN + 4, split_l, left_w - 8, split_l),
+              fill=200, width=1)
+    _draw_tasks(draw, tasks, MARGIN, split_l + 4,
+                left_w - MARGIN - 8, bot, fonts)
 
-    _draw_calendar(draw, events, MARGIN, body_top, left_w - MARGIN - 6,
-                   split_left - 4, fonts)
-    draw.line((MARGIN, split_left, left_w - 6, split_left), fill=0, width=1)
-    _draw_tasks(draw, tasks, MARGIN, split_left + 3, left_w - MARGIN - 6,
-                body_bot, fonts)
+    # right column: forecast (35 %) / containers (65 %)
+    split_r = top + int((bot - top) * 0.35)
+    _draw_forecast(draw, weather, rx, top, rw, split_r - 4, fonts)
+    draw.line((rx + 4, split_r, width - MARGIN - 4, split_r),
+              fill=200, width=1)
+    _draw_containers(draw, img, containers, rx, split_r + 4, rw,
+                     bot, fonts)
 
-    # ---- right column: forecast (37 %) + containers (63 %) ----
-    split_right = body_top + int((body_bot - body_top) * 0.37)
-
-    _draw_forecast(draw, weather, right_x, body_top, right_w,
-                   split_right - 4, fonts)
-    draw.line((right_x, split_right, width - MARGIN, split_right),
-              fill=0, width=1)
-    _draw_containers(draw, containers, right_x, split_right + 3, right_w,
-                     body_bot, fonts)
-
-    # ---- outer border ----
-    draw.rectangle((0, 0, width - 1, height - 1), outline=0, width=1)
-
-    # ---- footer ----
+    # ── footer ──
     now = _get_now()
     ft = f"Aktualizováno: {now.strftime('%H:%M')}"
-    fb = draw.textbbox((0, 0), ft, font=fonts['footer'])
-    draw.text((width - MARGIN - fb[2], height - 14), ft,
-              font=fonts['footer'], fill=100)
+    fw = draw.textbbox((0, 0), ft, font=fonts['footer'])[2]
+    draw.text((width - MARGIN - fw, height - 14), ft,
+              font=fonts['footer'], fill=140)
 
-    # ---- e-ink post-processing ----
+    # ── e-ink post-processing ──
     final = _optimize_for_eink(img)
 
-    # ---- optional rotation for Kindle hardware panel ----
-    rotate_deg = int(os.environ.get("ROTATE_DEG", "0"))
-    if rotate_deg in (90, 180, 270):
-        final = final.rotate(rotate_deg, expand=True)
+    # ── optional rotation ──
+    rot = int(os.environ.get('ROTATE_DEG', '0'))
+    if rot in (90, 180, 270):
+        final = final.rotate(rot, expand=True)
 
     buf = io.BytesIO()
-    final.save(buf, format="PNG")
+    final.save(buf, format='PNG')
     return buf.getvalue()
