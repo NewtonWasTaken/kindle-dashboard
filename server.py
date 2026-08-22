@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-DATA_REFRESH_INTERVAL = int(os.environ.get('REFRESH_INTERVAL', os.environ.get('DATA_REFRESH_INTERVAL', 300)))
+DATA_REFRESH_INTERVAL = int(os.environ.get('REFRESH_INTERVAL', 300))
 SCREEN_WIDTH = int(os.environ.get('SCREEN_WIDTH', 800))
 SCREEN_HEIGHT = int(os.environ.get('SCREEN_HEIGHT', 600))
 PORT = int(os.environ.get('PORT', 5000))

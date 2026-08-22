@@ -117,7 +117,7 @@ def _draw_header(draw, weather, width, fonts):
         temp = cur.get('temperature', 0)
         code = cur.get('weather_code', 0)
         desc = WMO_DESCRIPTIONS.get(code, '')
-        humidity = cur.get('humidity', 0)
+        pressure = cur.get('pressure', 0)
 
         # temperature (48px bold)
         temp_str = f"{temp:.0f}°C" if isinstance(temp, (int, float)) else str(temp)
@@ -126,12 +126,12 @@ def _draw_header(draw, weather, width, fonts):
         tx = width - MARGIN - tw
         draw.text((tx, 8), temp_str, font=fonts['weather_temp'], fill=0)
 
-        # weather icon (44x44)
-        icon_sz = 44
+        # weather icon (60x60)
+        icon_sz = 60
         draw_weather_icon(draw, code, tx - icon_sz - 10, 8, icon_sz)
 
         # description + humidity (15px)
-        desc_line = f"{desc}  ·  vlhkost {humidity}%"
+        desc_line = f"{desc}  ·  tlak {pressure} Pa"
         db = draw.textbbox((0, 0), desc_line, font=fonts['weather_desc'])
         dw = db[2] - db[0]
         draw.text((width - MARGIN - dw, 66), desc_line, font=fonts['weather_desc'], fill=80)
@@ -207,7 +207,10 @@ def _draw_calendar(draw, events, x, y_start, col_w, y_end, fonts):
         draw.text((x + 8, y), day_label, font=fonts['day_group'], fill=0)
         # thin underline
         lb = draw.textbbox((x + 8, y), day_label, font=fonts['day_group'])
-        draw.line((x + 8, lb[3] + 1, x + 8 + 90, lb[3] + 1), fill=140, width=1)
+        if day_label in ("Dnes", "Zítra"):
+            draw.line((x + 8, lb[3] + 1, x + 8 + 35, lb[3] + 1), fill=140, width=1)
+        else:
+            draw.line((x + 8, lb[3] + 1, x + 8 + 100, lb[3] + 1), fill=140, width=1)
         y += ROW + 1
 
         for ev in day_events:
@@ -270,7 +273,7 @@ def _draw_tasks(draw, tasks, x, y_start, col_w, y_end, fonts):
         draw.text((x + 28, y + 2), text, font=fonts['body'], fill=0)
         if due_str:
             tw = draw.textbbox((0, 0), text, font=fonts['body'])[2]
-            draw.text((x + 28 + tw, y + 4), due_str, font=fonts['small'], fill=100)
+            draw.text((x + 28 + tw, y + 5 ), due_str, font=fonts['small'], fill=100)
         y += ROW
 
 
@@ -543,8 +546,8 @@ def render_dashboard(
     _draw_tasks(draw, tasks, MARGIN, split_left + 3, left_w - MARGIN - 6,
                 body_bot, fonts)
 
-    # ---- right column: forecast (42 %) + containers (58 %) ----
-    split_right = body_top + int((body_bot - body_top) * 0.42)
+    # ---- right column: forecast (38 %) + containers (62 %) ----
+    split_right = body_top + int((body_bot - body_top) * 0.38)
 
     _draw_forecast(draw, weather, right_x, body_top, right_w,
                    split_right - 4, fonts)
