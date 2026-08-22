@@ -546,7 +546,7 @@ def render_dashboard(
     _draw_tasks(draw, tasks, MARGIN, split_left + 3, left_w - MARGIN - 6,
                 body_bot, fonts)
 
-    # ---- right column: forecast (38 %) + containers (62 %) ----
+    # ---- right column: forecast (35 %) + containers (65 %) ----
     split_right = body_top + int((body_bot - body_top) * 0.38)
 
     _draw_forecast(draw, weather, right_x, body_top, right_w,
