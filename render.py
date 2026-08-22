@@ -131,7 +131,7 @@ def _draw_header(draw, weather, width, fonts):
         draw_weather_icon(draw, code, tx - icon_sz - 10, 8, icon_sz)
 
         # description + humidity (15px)
-        desc_line = f"{desc}  ·  tlak {pressure} Pa"
+        desc_line = f"{desc}  ·  tlak {pressure} hPa"
         db = draw.textbbox((0, 0), desc_line, font=fonts['weather_desc'])
         dw = db[2] - db[0]
         draw.text((width - MARGIN - dw, 66), desc_line, font=fonts['weather_desc'], fill=80)

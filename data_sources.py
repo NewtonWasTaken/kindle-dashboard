@@ -162,7 +162,7 @@ def fetch_weather() -> dict:
     try:
         lat = os.environ.get("WEATHER_LAT", "50.0755")
         lon = os.environ.get("WEATHER_LON", "14.4378")
-        url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&current=temperature_2m,relative_humidity_2m,weather_code,surface_pressure&timezone=Europe%2FPrague&forecast_days=4")
+        url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&current=temperature_2m,relative_humidity_2m,weather_code,pressure_msl&timezone=Europe%2FPrague&forecast_days=4")
         
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
@@ -176,7 +176,7 @@ def fetch_weather() -> dict:
                 "temperature": current.get("temperature_2m", "N/A"),
                 "humidity": current.get("relative_humidity_2m", "N/A"),
                 "weather_code": current.get("weather_code", "N/A"),
-                "pressure": current.get("surface_pressure", "N/A")
+                "pressure": current.get("pressure_msl", "N/A")
             },
             "daily": []
         }
